@@ -155,7 +155,7 @@ def prepare_environment(args):
 
     # 导入依赖检查工具
     try:
-        from utils.package_checker import check_req_file
+        from build_utils.package_checker import check_req_file
     except ImportError:
         print('警告: 无法导入依赖检查工具,将强制重新安装')
         check_req_file = lambda x: False
