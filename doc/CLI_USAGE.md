@@ -472,9 +472,10 @@ docker run -e MANGA_TRANSLATOR_ADMIN_PASSWORD=your_password_here ...
 **说明**：
 - 密码至少需要 6 位字符
 - 只在首次启动且未设置密码时生效
-- 密码会自动保存到 `manga_translator/server/admin_config.json`
+- 密码会自动保存到 `manga_translator/server/data/admin_config.json`
 - 后续启动会使用保存的密码，不再读取环境变量
 - 如需修改密码，请在管理面板中使用"更改管理员密码"功能
+- 如果你是用 Docker 长期部署 Web UI，记得额外挂载 `/app/manga_translator/server/data`、`/app/examples`、`/app/dict`、`/app/fonts`、`/app/models`；现在管理员配置和用户上传资源都在 `server/data` 里。如果要在网页后台保存服务器 API Keys，还要额外挂载 `/app/.env`
 
 **核心功能**：
 

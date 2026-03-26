@@ -11,13 +11,13 @@ from ..custom_api_params import (
     load_enabled_custom_api_params,
     split_gemini_request_params,
 )
+from ..runtime_api_resolver import resolve_runtime_api_config
 from ..utils import get_logger
 from ..utils.ai_image_preprocess import (
     normalize_ai_image,
     prepare_square_ai_image,
     restore_square_ai_image,
 )
-from ..utils.openai_compat import resolve_openai_compatible_api_key
 from ..utils.openai_image_interface import request_openai_image_with_fallback
 from ..utils.retry import run_with_retry
 from .common import CommonColorizer
@@ -69,6 +69,7 @@ class BaseAPIColorizer(CommonColorizer):
     BROWSER_HEADERS = {}
     PROVIDER_NAME = "API Colorizer"
     ALLOW_EMPTY_LOCAL_API_KEY = False
+    RUNTIME_PROVIDER = ""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -89,7 +90,7 @@ class BaseAPIColorizer(CommonColorizer):
             except Exception:
                 pass
 
-    def _read_runtime_config(self):
+    def _read_runtime_config(self, runtime_config=None):
         try:
             from dotenv import load_dotenv
 
@@ -97,24 +98,33 @@ class BaseAPIColorizer(CommonColorizer):
         except Exception:
             pass
 
-        api_key = os.getenv(self.API_KEY_ENV) or os.getenv(self.FALLBACK_API_KEY_ENV)
-        base_url = (
-            os.getenv(self.API_BASE_ENV)
-            or os.getenv(self.FALLBACK_API_BASE_ENV)
-            or self.DEFAULT_API_BASE
+        return resolve_runtime_api_config(
+            runtime_config,
+            feature="colorizer",
+            provider=self.RUNTIME_PROVIDER,
+            api_key_env=self.API_KEY_ENV,
+            api_base_env=self.API_BASE_ENV,
+            model_env=self.MODEL_ENV,
+            fallback_api_key_env=self.FALLBACK_API_KEY_ENV,
+            fallback_api_base_env=self.FALLBACK_API_BASE_ENV,
+            fallback_model_env=self.FALLBACK_MODEL_ENV,
+            default_api_base=self.DEFAULT_API_BASE,
+            default_model=self.DEFAULT_MODEL,
+            allow_empty_local_api_key=self.ALLOW_EMPTY_LOCAL_API_KEY,
         )
-        model_name = (
-            os.getenv(self.MODEL_ENV)
-            or os.getenv(self.FALLBACK_MODEL_ENV)
-            or self.DEFAULT_MODEL
-        )
-        if self.ALLOW_EMPTY_LOCAL_API_KEY:
-            api_key = resolve_openai_compatible_api_key(api_key, base_url)
-        return api_key, base_url.rstrip("/"), model_name
 
-    async def _ensure_client(self):
+    def _missing_api_key_message(self) -> str:
+        message = f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env"
+        if self.FALLBACK_API_KEY_ENV:
+            message += f" (or fallback {self.FALLBACK_API_KEY_ENV})"
+        return message + "."
+
+    async def _ensure_client(self, runtime_config=None):
         current_loop = asyncio.get_running_loop()
-        api_key, base_url, model_name = self._read_runtime_config()
+        settings = self._read_runtime_config(runtime_config)
+        api_key = settings.api_key
+        base_url = settings.base_url
+        model_name = settings.model_name
         signature = (api_key or "", base_url, model_name)
         if (
             self.client is not None
@@ -297,19 +307,16 @@ class BaseAPIColorizer(CommonColorizer):
 
     async def _colorize(self, image: Image.Image, colorization_size: int, **kwargs) -> Image.Image:
         del colorization_size
-        await self._ensure_client()
+        runtime_config = kwargs.get("config")
+        await self._ensure_client(runtime_config)
         if not self.client or not self.api_key:
-            raise RuntimeError(
-                f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env "
-                f"(or fallback {self.FALLBACK_API_KEY_ENV})."
-            )
+            raise RuntimeError(self._missing_api_key_message())
 
         image = self._to_rgb_image(image)
         original_size = image.size
         request_image, restore_info = prepare_square_ai_image(image)
         prompt_text, reference_images = self._build_colorizer_request(image, kwargs)
         semaphore = _get_colorizer_semaphore(self.PROVIDER_NAME, self._resolve_concurrency(kwargs))
-        runtime_config = kwargs.get("config")
         custom_api_params = load_enabled_custom_api_params(
             runtime_config,
             self.logger,
@@ -318,12 +325,9 @@ class BaseAPIColorizer(CommonColorizer):
 
         async with semaphore:
             async def _do_request() -> Image.Image:
-                await self._ensure_client()
+                await self._ensure_client(runtime_config)
                 if not self.client or not self.api_key:
-                    raise RuntimeError(
-                        f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env "
-                        f"(or fallback {self.FALLBACK_API_KEY_ENV})."
-                    )
+                    raise RuntimeError(self._missing_api_key_message())
                 return await self._request_colorized_image(
                     image=request_image,
                     prompt_text=prompt_text,
@@ -362,14 +366,15 @@ class OpenAIColorizer(BaseAPIColorizer):
     API_KEY_ENV = "COLOR_OPENAI_API_KEY"
     API_BASE_ENV = "COLOR_OPENAI_API_BASE"
     MODEL_ENV = "COLOR_OPENAI_MODEL"
-    FALLBACK_API_KEY_ENV = "OPENAI_API_KEY"
-    FALLBACK_API_BASE_ENV = "OPENAI_API_BASE"
-    FALLBACK_MODEL_ENV = "OPENAI_MODEL"
+    FALLBACK_API_KEY_ENV = ""
+    FALLBACK_API_BASE_ENV = ""
+    FALLBACK_MODEL_ENV = ""
     DEFAULT_API_BASE = "https://api.openai.com/v1"
     DEFAULT_MODEL = "gpt-image-1"
     BROWSER_HEADERS = OPENAI_BROWSER_HEADERS
     PROVIDER_NAME = "OpenAI Colorizer"
     ALLOW_EMPTY_LOCAL_API_KEY = True
+    RUNTIME_PROVIDER = "openai"
 
     def _create_client(self, api_key: str, base_url: str):
         from ..translators.common import AsyncOpenAICurlCffi
@@ -412,13 +417,14 @@ class GeminiColorizer(BaseAPIColorizer):
     API_KEY_ENV = "COLOR_GEMINI_API_KEY"
     API_BASE_ENV = "COLOR_GEMINI_API_BASE"
     MODEL_ENV = "COLOR_GEMINI_MODEL"
-    FALLBACK_API_KEY_ENV = "GEMINI_API_KEY"
-    FALLBACK_API_BASE_ENV = "GEMINI_API_BASE"
-    FALLBACK_MODEL_ENV = "GEMINI_MODEL"
+    FALLBACK_API_KEY_ENV = ""
+    FALLBACK_API_BASE_ENV = ""
+    FALLBACK_MODEL_ENV = ""
     DEFAULT_API_BASE = "https://generativelanguage.googleapis.com"
     DEFAULT_MODEL = "gemini-2.0-flash-preview-image-generation"
     BROWSER_HEADERS = GEMINI_BROWSER_HEADERS
     PROVIDER_NAME = "Gemini Colorizer"
+    RUNTIME_PROVIDER = "gemini"
     SAFETY_SETTINGS = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF"},
         {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "OFF"},

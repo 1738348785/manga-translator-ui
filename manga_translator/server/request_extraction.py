@@ -39,7 +39,9 @@ class TaskLogHandler(logging.Handler):
             from manga_translator.server.core.logging_manager import add_log
             msg = self.format(record)
             level = record.levelname
-            add_log(msg, level, self.task_id, self.session_id)
+            # Root logger already prints the original record to the console.
+            # Only mirror it into the task log queue here to avoid duplicate output.
+            add_log(msg, level, self.task_id, self.session_id, skip_print=True)
         except Exception:
             self.handleError(record)
 
@@ -83,15 +85,14 @@ def _remove_task_log_handler(handler: TaskLogHandler):
 @asynccontextmanager
 async def with_user_env_vars(config: Config):
     """
-    Unified environment variable management context manager.
-    Used for all translation endpoints to ensure user-provided env vars are applied.
+    Compatibility wrapper kept for the existing call sites.
+
+    User-specific API settings are now carried on the request Config object and
+    resolved explicitly by each backend, so we no longer mutate process-wide
+    environment variables here.
     """
-    from manga_translator.server.core.config_manager import temp_env_vars
-    
-    user_env_vars = getattr(config, '_user_env_vars', None)
-    
-    with temp_env_vars(user_env_vars):
-        yield
+    del config
+    yield
 
 class TranslateRequest(BaseModel):
     """This request can be a multipart or a json request"""

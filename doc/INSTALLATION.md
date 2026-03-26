@@ -264,6 +264,8 @@ python -m desktop-ui.main
 
 适合使用宝塔面板、Portainer 等 Docker 管理工具的用户。
 
+> 💡 **说明**：下面的 `docker run` 命令适合临时测试。正式部署 Web UI 时，建议至少按“Web UI 持久化目录”一节挂载数据目录。
+
 ### 快速启动
 
 **Windows CMD / PowerShell**：
@@ -278,7 +280,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 
 启动后访问：
 - 🌐 用户界面：http://localhost:8000
-- 🔧 管理界面：http://localhost:8000/admin.html
+- 🔧 管理界面：http://localhost:8000/admin
 
 ### 镜像仓库
 
@@ -293,6 +295,54 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 - GPU 版本：`ghcr.io/hgmzhn/manga-translator:latest-gpu`
 
 > 💡 **提示**：两个仓库的镜像完全相同，选择下载速度更快的即可。
+
+### Web UI 持久化目录（推荐）
+
+如果你准备长期使用 Web UI，建议持久化下面这些路径：
+
+| 容器内路径 | 建议程度 | 作用 |
+|-----------|---------|------|
+| `/app/manga_translator/server/data` | 必须 | 统一保存 `admin_config.json`、`user_resources/`、账号、会话、用户组、权限、配额、API Key 预设、用户配置、审计日志、翻译历史索引与 Web 历史结果 |
+| `/app/examples` | 强烈建议 | 保存 `config.json`、`custom_api_params.json`、`filter_list.json` 等会自动生成或被编辑的配置文件 |
+| `/app/dict` | 强烈建议 | 保存术语表、网页端/本地 AI prompt 文件（如 `ai_ocr_prompt.yaml`、`ai_renderer_prompt.yaml`、`ai_colorizer_prompt.yaml`） |
+| `/app/fonts` | 强烈建议 | 保存服务器级字体文件 |
+| `/app/models` | 强烈建议 | 保存下载后的模型文件，避免容器重建后重新下载 |
+| `/app/.env` | 按需 | 如果你会在 Web 管理界面保存服务器 API Keys，必须额外挂这个文件 |
+| `/app/logs` | 可选 | 保存根目录运行日志 |
+| `/app/result` | 可选 | 保存 CLI/调试产物；Web 历史结果主要还是在 `server/data/results` 里 |
+
+> 💡 **文件挂载提醒**：
+> - 现在 `admin_config.json` 和 `user_resources/` 都包含在 `/app/manga_translator/server/data` 目录里
+> - 只有 `/app/.env` 还是**文件**绑定；请先在宿主机创建空文件，再启动容器，否则 Docker 可能会把它当目录创建出来
+
+### 推荐的 docker-compose 持久化示例
+
+下面这份示例比最小启动命令更适合长期运行 Web UI：
+
+```yaml
+services:
+  manga-translator:
+    image: hgmzhn/manga-translator:latest-cpu
+    container_name: manga-translator
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MT_WEB_HOST: 0.0.0.0
+      MT_WEB_PORT: 8000
+      MANGA_TRANSLATOR_ADMIN_PASSWORD: change_me_123456
+    volumes:
+      - ./data/models:/app/models
+      - ./data/fonts:/app/fonts
+      - ./data/dict:/app/dict
+      - ./data/config:/app/examples
+      - ./data/server:/app/manga_translator/server/data
+      - ./data/logs:/app/logs
+      - ./data/result:/app/result
+      # 如果要让 Web 管理界面里保存的服务器 API Keys 在重建容器后仍然保留，
+      # 先创建空文件 ./data/app.env，再取消下面这行注释：
+      # - ./data/app.env:/app/.env
+```
 
 ### 端口映射
 
@@ -332,6 +382,14 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 | `GEMINI_API_KEY` | Google Gemini API Key（用于 gemini、gemini_hq 翻译器） |
 | `GEMINI_MODEL` | Gemini 模型名称（可选，默认 gemini-1.5-flash-002） |
 | `GEMINI_API_BASE` | Gemini API 基础 URL（可选，默认官方地址） |
+
+**Vertex 系列**：
+| 变量名 | 说明 |
+|--------|------|
+| `VERTEX_API_KEY` | Vertex API Key（用于 vertex、vertex_hq 翻译器） |
+| `VERTEX_MODEL` | Vertex 模型名称（可选，默认 gemini-1.5-flash-002） |
+
+> 💡 **说明**：Vertex 系列固定使用 Google 官方 Gemini host，`VERTEX_API_BASE` 不对外提供，也无需配置。
 
 **其他商业翻译服务**：
 | 变量名 | 说明 |
@@ -375,7 +433,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 
 部署成功后访问：
 - **用户界面**：`http://服务器IP:8000`
-- **管理界面**：`http://服务器IP:8000/admin.html`（需要管理员密码）
+- **管理界面**：`http://服务器IP:8000/admin`（需要管理员密码）
 
 ### 宝塔面板部署步骤
 
@@ -397,22 +455,31 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
    - **镜像**：选择刚才拉取的镜像
    - **端口映射**：`8000:8000`
    - **环境变量**：根据需要添加（可选）
-     
+   - **挂载目录/文件**：建议至少挂载下面这些路径
+     - `宿主机目录 -> /app/manga_translator/server/data`
+     - `宿主机目录 -> /app/examples`
+     - `宿主机目录 -> /app/dict`
+     - `宿主机目录 -> /app/fonts`
+     - `宿主机目录 -> /app/models`
+     - 如需在网页后台保存服务器 API Keys，再额外挂 `宿主机文件 -> /app/.env`
+
      **最小配置**（无需设置环境变量，直接启动即可）
-     
+
      **推荐配置示例**（设置管理员密码和 GPU）：
-     ```
-     MT_USE_GPU=true
-     MANGA_TRANSLATOR_ADMIN_PASSWORD=your_secure_password
-     ```
-     
+      ```
+      MT_USE_GPU=true
+      MANGA_TRANSLATOR_ADMIN_PASSWORD=your_secure_password
+      ```
+
      **完整配置示例**（包含 API Keys）：
      ```
-     MT_USE_GPU=true
-     MANGA_TRANSLATOR_ADMIN_PASSWORD=your_secure_password
-     OPENAI_API_KEY=sk-xxxxxxxxxxxxx
-     GEMINI_API_KEY=xxxxxxxxxxxxx
-     ```
+      MT_USE_GPU=true
+      MANGA_TRANSLATOR_ADMIN_PASSWORD=your_secure_password
+      OPENAI_API_KEY=sk-xxxxxxxxxxxxx
+      GEMINI_API_KEY=xxxxxxxxxxxxx
+      VERTEX_API_KEY=xxxxxxxxxxxxx
+      VERTEX_MODEL=gemini-1.5-flash-002
+      ```
 
 5. **启动容器**，访问 `http://服务器IP:8000` 即可使用
 
@@ -420,7 +487,7 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 
 **部署完成后**：
 - 🌐 **用户界面**：`http://服务器IP:8000` - 上传图片进行翻译
-- 🔧 **管理界面**：`http://服务器IP:8000/admin.html` - 配置翻译器和参数（需要管理员密码）
+- 🔧 **管理界面**：`http://服务器IP:8000/admin` - 配置翻译器和参数（需要管理员密码）
 - 📖 **使用教程**：[命令行使用指南](CLI_USAGE.md) - 了解更多功能和命令行模式
 
 ---
@@ -556,6 +623,7 @@ A: 运行 `./macOS_4_更新维护.sh`，选择"完整更新"即可。
 1. 在"基础设置"中找到"翻译器"下拉菜单
 2. 首次使用推荐选择：
    - **高质量翻译 OpenAI** 或 **高质量翻译 Gemini**（多模态，看图翻译，效果最好）⭐ 强烈推荐
+   - 如需把 Google 官方 Key 与 Gemini 配置隔离，可选 **高质量翻译 Vertex**
    - 需要配置 API Key → [查看 API 配置教程](API_CONFIG.md)
 
 ### 5. 添加图片

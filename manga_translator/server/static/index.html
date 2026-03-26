@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Manga Translator Web UI</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=12">
     <style>
         .user-login-container {
             display: none;
@@ -269,7 +269,7 @@
                         <!-- API Keys -->
                         <div id="apikeys" class="tab-pane">
                             <div class="env-editor-container">
-                                <p class="env-hint" id="env-hint-text">根据选择的翻译器，下方会显示所需的 API 密钥输入框</p>
+                                <p class="env-hint" id="env-hint-text">在这里管理翻译、OCR、上色和渲染所需的 API 密钥。</p>
                                 <div id="env-inputs-container"></div>
                             </div>
                         </div>
@@ -324,6 +324,7 @@
         }
     </script>
     <script src="/static/js/history-gallery.js"></script>
-    <script src="/static/script.js"></script>
+    <script src="/static/js/shared/api-key-schema.js?v=1"></script>
+    <script src="/static/script.js?v=12"></script>
 </body>
 </html>

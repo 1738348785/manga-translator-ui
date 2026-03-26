@@ -139,6 +139,18 @@ async def require_auth(
                 }
             }
         )
+
+    if not session_service.update_activity(session_token):
+        logger.warning("Authentication failed: Failed to refresh session activity")
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": {
+                    "code": "INVALID_TOKEN",
+                    "message": "会话令牌无效或已过期，请重新登录"
+                }
+            }
+        )
     
     # 检查用户是否活跃
     account_service, _, _ = get_services()

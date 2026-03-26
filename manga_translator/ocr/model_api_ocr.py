@@ -16,9 +16,9 @@ from ..custom_api_params import (
     merge_openai_request_params,
     split_gemini_request_params,
 )
+from ..runtime_api_resolver import resolve_runtime_api_config
 from ..utils import Quadrilateral
 from ..utils.generic import AvgMeter
-from ..utils.openai_compat import resolve_openai_compatible_api_key
 from ..utils.retry import run_with_retry
 from .common import OfflineOCR
 from .prompt_loader import (
@@ -75,6 +75,7 @@ class BaseAPIOCR(OfflineOCR):
     PROVIDER_NAME = "API OCR"
     SUPPORTS_RUNTIME_CONFIG = True
     ALLOW_EMPTY_LOCAL_API_KEY = False
+    RUNTIME_PROVIDER = ""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -108,22 +109,13 @@ class BaseAPIOCR(OfflineOCR):
             self.use_gpu = False
 
         await self._load_color_model(self.device)
-        await self._ensure_client(force=True)
 
     async def _unload(self):
         if self.color_model is not None:
             del self.color_model
             self.color_model = None
-        if self.client is not None:
-            try:
-                await self.client.close()
-            except Exception:
-                pass
-            self.client = None
-        self._client_signature = None
-        self._client_loop = None
 
-    def _read_runtime_config(self):
+    def _read_runtime_config(self, runtime_config=None):
         try:
             from dotenv import load_dotenv
 
@@ -131,53 +123,36 @@ class BaseAPIOCR(OfflineOCR):
         except Exception:
             pass
 
-        api_key = os.getenv(self.API_KEY_ENV) or os.getenv(self.FALLBACK_API_KEY_ENV)
-        base_url = (
-            os.getenv(self.API_BASE_ENV)
-            or os.getenv(self.FALLBACK_API_BASE_ENV)
-            or self.DEFAULT_API_BASE
+        return resolve_runtime_api_config(
+            runtime_config,
+            feature="ocr",
+            provider=self.RUNTIME_PROVIDER,
+            api_key_env=self.API_KEY_ENV,
+            api_base_env=self.API_BASE_ENV,
+            model_env=self.MODEL_ENV,
+            fallback_api_key_env=self.FALLBACK_API_KEY_ENV,
+            fallback_api_base_env=self.FALLBACK_API_BASE_ENV,
+            fallback_model_env=self.FALLBACK_MODEL_ENV,
+            default_api_base=self.DEFAULT_API_BASE,
+            default_model=self.DEFAULT_MODEL,
+            allow_empty_local_api_key=self.ALLOW_EMPTY_LOCAL_API_KEY,
         )
-        model_name = (
-            os.getenv(self.MODEL_ENV)
-            or os.getenv(self.FALLBACK_MODEL_ENV)
-            or self.DEFAULT_MODEL
-        )
-        if self.ALLOW_EMPTY_LOCAL_API_KEY:
-            api_key = resolve_openai_compatible_api_key(api_key, base_url)
-        return api_key, base_url.rstrip("/"), model_name
 
-    async def _ensure_client(self, force: bool = False):
-        current_loop = asyncio.get_running_loop()
-        api_key, base_url, model_name = self._read_runtime_config()
-        signature = (api_key or "", base_url, model_name)
+    def _missing_api_key_message(self) -> str:
+        message = f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env"
+        if self.FALLBACK_API_KEY_ENV:
+            message += f" (or fallback {self.FALLBACK_API_KEY_ENV})"
+        return message + "."
 
-        if (
-            not force
-            and self.client is not None
-            and signature == self._client_signature
-            and self._client_loop is current_loop
-        ):
+    async def _close_client(self, client):
+        if client is None:
             return
-
-        if self.client is not None:
-            if self._client_loop is current_loop:
-                try:
-                    await self.client.close()
-                except Exception:
-                    pass
-            else:
-                self.logger.info(f"{self.PROVIDER_NAME}: recreating API client for a new event loop.")
-            self.client = None
-            self._client_loop = None
-
-        self.api_key = api_key
-        self.base_url = base_url
-        self.model_name = model_name
-        self._client_signature = signature
-
-        if api_key:
-            self.client = self._create_client(api_key=api_key, base_url=base_url)
-            self._client_loop = current_loop
+        close_fn = getattr(client, "close", None)
+        if not callable(close_fn):
+            return
+        close_result = close_fn()
+        if asyncio.iscoroutine(close_result):
+            await close_result
 
     def _build_ocr_prompt(self, config: OcrConfig) -> str:
         ensure_ai_ocr_prompt_file()
@@ -242,21 +217,6 @@ class BaseAPIOCR(OfflineOCR):
 
     async def _reset_client_for_retry(self, attempt_index: int, error: Exception):
         del attempt_index, error
-        if self.client is None:
-            return
-
-        try:
-            current_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            current_loop = None
-
-        if self._client_loop is current_loop and current_loop is not None:
-            try:
-                await self.client.close()
-            except Exception:
-                pass
-        self.client = None
-        self._client_loop = None
 
     async def _load_color_model(self, device: str):
         from .model_48px import OCR
@@ -377,27 +337,30 @@ class BaseAPIOCR(OfflineOCR):
         img: np.ndarray,
         prompt_text: str,
         runtime_config=None,
+        runtime_settings=None,
         custom_api_params: dict | None = None,
     ) -> str:
-        await self._ensure_client()
-        if not self.client or not self.api_key:
-            raise RuntimeError(
-                f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env "
-                f"(or fallback {self.FALLBACK_API_KEY_ENV})."
-            )
+        settings = runtime_settings or self._read_runtime_config(runtime_config)
+        if not settings.api_key:
+            raise RuntimeError(self._missing_api_key_message())
 
         async def _do_request() -> str:
-            await self._ensure_client()
-            text = self._normalize_ocr_text(
-                await self._request_ocr_text(
-                    img=img,
-                    prompt_text=prompt_text,
-                    custom_api_params=custom_api_params,
+            client = self._create_client(api_key=settings.api_key, base_url=settings.base_url)
+            try:
+                text = self._normalize_ocr_text(
+                    await self._request_ocr_text(
+                        client=client,
+                        model_name=settings.model_name,
+                        img=img,
+                        prompt_text=prompt_text,
+                        custom_api_params=custom_api_params,
+                    )
                 )
-            )
-            if not text:
-                raise RuntimeError(f"{self.PROVIDER_NAME} response did not contain OCR text.")
-            return text
+                if not text:
+                    raise RuntimeError(f"{self.PROVIDER_NAME} response did not contain OCR text.")
+                return text
+            finally:
+                await self._close_client(client)
 
         return await run_with_retry(
             operation=_do_request,
@@ -405,7 +368,6 @@ class BaseAPIOCR(OfflineOCR):
             provider_name=self.PROVIDER_NAME,
             operation_name="OCR request",
             logger=self.logger,
-            on_retry=self._reset_client_for_retry,
         )
 
     async def _infer(
@@ -424,8 +386,9 @@ class BaseAPIOCR(OfflineOCR):
         quadrilaterals = list(self._generate_text_direction(textlines))
         output_regions = []
         pending_regions = []
-
-        await self._ensure_client()
+        runtime_settings = self._read_runtime_config(runtime_config)
+        if not runtime_settings.api_key:
+            raise RuntimeError(self._missing_api_key_message())
 
         for idx, (q, direction) in enumerate(quadrilaterals):
             region_img = q.get_transformed_region(image, direction, text_height)
@@ -453,6 +416,7 @@ class BaseAPIOCR(OfflineOCR):
                         region_img,
                         ocr_prompt,
                         runtime_config=runtime_config,
+                        runtime_settings=runtime_settings,
                         custom_api_params=custom_api_params,
                     )
                     self.logger.info(f"[OCR] Region {idx}: {text}")
@@ -481,7 +445,7 @@ class BaseAPIOCR(OfflineOCR):
     def _create_client(self, api_key: str, base_url: str):
         raise NotImplementedError
 
-    async def _request_ocr_text(self, img: np.ndarray, prompt_text: str) -> str:
+    async def _request_ocr_text(self, client, model_name: str, img: np.ndarray, prompt_text: str) -> str:
         raise NotImplementedError
 
 
@@ -489,14 +453,15 @@ class ModelOpenAIOCR(BaseAPIOCR):
     API_KEY_ENV = "OCR_OPENAI_API_KEY"
     API_BASE_ENV = "OCR_OPENAI_API_BASE"
     MODEL_ENV = "OCR_OPENAI_MODEL"
-    FALLBACK_API_KEY_ENV = "OPENAI_API_KEY"
-    FALLBACK_API_BASE_ENV = "OPENAI_API_BASE"
-    FALLBACK_MODEL_ENV = "OPENAI_MODEL"
+    FALLBACK_API_KEY_ENV = ""
+    FALLBACK_API_BASE_ENV = ""
+    FALLBACK_MODEL_ENV = ""
     DEFAULT_API_BASE = "https://api.openai.com/v1"
     DEFAULT_MODEL = "gpt-4o"
     BROWSER_HEADERS = OPENAI_BROWSER_HEADERS
     PROVIDER_NAME = "OpenAI OCR"
     ALLOW_EMPTY_LOCAL_API_KEY = True
+    RUNTIME_PROVIDER = "openai"
 
     def _create_client(self, api_key: str, base_url: str):
         from ..translators.common import AsyncOpenAICurlCffi
@@ -533,6 +498,8 @@ class ModelOpenAIOCR(BaseAPIOCR):
 
     async def _request_ocr_text(
         self,
+        client,
+        model_name: str,
         img: np.ndarray,
         prompt_text: str,
         custom_api_params: dict | None = None,
@@ -540,7 +507,7 @@ class ModelOpenAIOCR(BaseAPIOCR):
         image_b64 = self._encode_region_png_base64(img)
         request_params = merge_openai_request_params(
             {
-                "model": self.model_name,
+                "model": model_name,
                 "messages": [
                     {
                         "role": "user",
@@ -556,7 +523,7 @@ class ModelOpenAIOCR(BaseAPIOCR):
             },
             custom_api_params,
         )
-        response = await self.client.chat.completions.create(
+        response = await client.chat.completions.create(
             **request_params,
         )
         if not getattr(response, "choices", None):
@@ -568,13 +535,14 @@ class ModelGeminiOCR(BaseAPIOCR):
     API_KEY_ENV = "OCR_GEMINI_API_KEY"
     API_BASE_ENV = "OCR_GEMINI_API_BASE"
     MODEL_ENV = "OCR_GEMINI_MODEL"
-    FALLBACK_API_KEY_ENV = "GEMINI_API_KEY"
-    FALLBACK_API_BASE_ENV = "GEMINI_API_BASE"
-    FALLBACK_MODEL_ENV = "GEMINI_MODEL"
+    FALLBACK_API_KEY_ENV = ""
+    FALLBACK_API_BASE_ENV = ""
+    FALLBACK_MODEL_ENV = ""
     DEFAULT_API_BASE = "https://generativelanguage.googleapis.com"
     DEFAULT_MODEL = "gemini-1.5-flash"
     BROWSER_HEADERS = GEMINI_BROWSER_HEADERS
     PROVIDER_NAME = "Gemini OCR"
+    RUNTIME_PROVIDER = "gemini"
     SAFETY_SETTINGS = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF"},
         {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "OFF"},
@@ -603,6 +571,8 @@ class ModelGeminiOCR(BaseAPIOCR):
 
     async def _request_ocr_text(
         self,
+        client,
+        model_name: str,
         img: np.ndarray,
         prompt_text: str,
         custom_api_params: dict | None = None,
@@ -610,7 +580,7 @@ class ModelGeminiOCR(BaseAPIOCR):
         image_b64 = self._encode_region_png_base64(img)
         request_overrides, generation_overrides = split_gemini_request_params(custom_api_params)
         request_kwargs = {
-            "model": self.model_name,
+            "model": model_name,
             "contents": [
                 {
                     "role": "user",
@@ -630,5 +600,5 @@ class ModelGeminiOCR(BaseAPIOCR):
         if generation_overrides:
             request_kwargs["generationConfig"] = generation_overrides
         request_kwargs.update(request_overrides)
-        response = await self.client.models.generate_content(**request_kwargs)
+        response = await client.models.generate_content(**request_kwargs)
         return self._extract_gemini_text(response)

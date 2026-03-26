@@ -10,6 +10,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from manga_translator.server_paths import SERVER_DATA_DIR, USER_RESOURCES_DIR
+
 logger = logging.getLogger('manga_translator.server')
 
 
@@ -19,15 +21,10 @@ class CleanupService:
     def __init__(self):
         self.running = False
         self.task: Optional[asyncio.Task] = None
-        # 使用 server 模块内的数据目录
-        server_dir = os.path.dirname(os.path.dirname(__file__))  # manga_translator/server
-        data_dir = os.path.join(server_dir, "data")
-        user_resources_dir = os.path.join(server_dir, "user_resources")
-        
         self.directories = {
-            "results": os.path.join(data_dir, "results"),
-            "user_fonts": os.path.join(user_resources_dir, "fonts"),
-            "user_prompts": os.path.join(user_resources_dir, "prompts")
+            "results": str(SERVER_DATA_DIR / "results"),
+            "user_fonts": str(USER_RESOURCES_DIR / "fonts"),
+            "user_prompts": str(USER_RESOURCES_DIR / "prompts")
         }
     
     def get_settings(self) -> dict:

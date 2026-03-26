@@ -10,7 +10,7 @@ This document summarizes the core translation pipeline and the built-in visual e
 
 - **🔍 Smart Text Detection**: automatically detects text regions in manga pages
 - **📝 Multilingual OCR**: supports Japanese, Chinese, English, Korean, and more
-- **🌐 Multiple Translators**: supports `OpenAI`, `Google Gemini`, `Sakura`, `OpenAI High Quality`, and `Gemini High Quality`
+- **🌐 Multiple Translators**: supports `OpenAI`, `Google Gemini`, `Vertex`, `Sakura`, `OpenAI High Quality`, `Gemini High Quality`, and `Vertex High Quality`
 - **🎯 High-Quality Translation**: multimodal translators can use image context for better results
 - **📚 Auto Extract Glossary**: automatically collects names, places, organizations, and other terms
 - **🎨 Inpainting**: removes source text and repairs the background
@@ -74,6 +74,7 @@ The built-in editor is designed for precise post-processing.
 |--------|------|
 | `OpenAI` | OpenAI-compatible text translation |
 | `Google Gemini` | Gemini-family text translation |
+| `Vertex` | Gemini-family translation with a separate `VERTEX_*` credential namespace |
 | `Sakura` | Japanese-focused translation backend |
 
 ### High-Quality Translators
@@ -82,6 +83,7 @@ The built-in editor is designed for precise post-processing.
 |--------|------|
 | `OpenAI High Quality` | Multimodal translation with image context |
 | `Gemini High Quality` | Multimodal translation with image context |
+| `Vertex High Quality` | Multimodal translation with image context through the fixed official Gemini host |
 
 **Why high-quality translators matter**:
 

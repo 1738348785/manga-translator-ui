@@ -355,8 +355,10 @@ Supported translators:
 
 - `OpenAI`
 - `Google Gemini`
+- `Vertex`
 - `OpenAI High Quality`
 - `Gemini High Quality`
+- `Vertex High Quality`
 
 Relevant setting:
 
@@ -382,8 +384,10 @@ Supported translators:
 
 - `OpenAI`
 - `Google Gemini`
+- `Vertex`
 - `OpenAI High Quality`
 - `Gemini High Quality`
+- `Vertex High Quality`
 
 Relevant setting:
 

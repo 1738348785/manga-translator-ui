@@ -15,8 +15,8 @@
 ### 翻译器设置
 
 - **翻译器 (translator)**：选择翻译引擎
-  - 在线翻译器：Google Gemini、OpenAI、DeepL、百度翻译等
-  - 高质量翻译器：高质量翻译 OpenAI、高质量翻译 Gemini（推荐）
+  - 在线翻译器：OpenAI、Google Gemini、Vertex、DeepL、百度翻译等
+  - 高质量翻译器：高质量翻译 OpenAI、高质量翻译 Gemini、高质量翻译 Vertex（推荐）
 
 - **目标语言 (target_lang)**：翻译的目标语言
   - 简体中文、繁体中文、英语、日语、韩语等
@@ -34,7 +34,7 @@
     - 若希望不过滤任何文本，保持为 `none`
 
 - **启用流式传输 (enable_streaming)**：控制是否优先使用流式翻译响应
-  - 适用于：OpenAI、Gemini、高质量翻译 OpenAI、高质量翻译 Gemini 四个翻译器
+  - 适用于：OpenAI、Gemini、Vertex、高质量翻译 OpenAI、高质量翻译 Gemini、高质量翻译 Vertex 六个翻译器
   - 默认：开启（`true`）
   - 开启后：优先使用统一流式传输层，实时接收增量响应；失败时自动回退到普通请求
   - 关闭后：始终使用普通非流式请求，不再尝试流式传输
@@ -46,7 +46,7 @@
   - 同文结果不会再因为“译文与原文相同”而被后处理阶段误判为已跳过
 
 - **自定义提示词 (high_quality_prompt_path)**：自定义提示词文件路径
-  - 适用于：OpenAI、Gemini、高质量翻译 OpenAI、高质量翻译 Gemini 四个翻译器
+  - 适用于：OpenAI、Gemini、Vertex、高质量翻译 OpenAI、高质量翻译 Gemini、高质量翻译 Vertex 六个翻译器
   - 默认：`dict/prompt_example.yaml`
   - 可以在 `dict` 目录下创建新的 `.yaml` 或 `.json` 文件
   - YAML/JSON 格式只需符合标准规范即可加载，优先加载 YAML
@@ -54,7 +54,7 @@
   - 添加新提示词文件后，直接点击下拉菜单即可看到新文件，无需重启
 
 - **自动提取新术语 (extract_glossary)**：自动从翻译结果中提取新术语
-  - 适用于：OpenAI、Gemini、高质量翻译 OpenAI、高质量翻译 Gemini 四个翻译器
+  - 适用于：OpenAI、Gemini、Vertex、高质量翻译 OpenAI、高质量翻译 Gemini、高质量翻译 Vertex 六个翻译器
   - 勾选后，AI 会自动识别并提取人名、地名、组织名等专有名词
   - 提取的术语会自动添加到自定义提示词的术语表中
   - 后续翻译时会参考这些术语，保持翻译一致性
@@ -179,7 +179,7 @@
 
 - **批量大小 (batch_size)**：批量处理大小
   - 默认：1
-  - 对于高质量翻译器（OpenAI HQ/Gemini HQ），此参数控制一次发送的图片数量
+  - 对于高质量翻译器（OpenAI HQ/Gemini HQ/Vertex HQ），此参数控制一次发送的图片数量
   - 越大翻译速度越快，但消耗的 tokens 越多
   - 建议范围：1-10
 
@@ -375,7 +375,7 @@
 - **气泡内居中 (center_text_in_bubble)**：文本块在气泡框内居中显示
 
 - **AI断句自动扩大文字 (optimize_line_breaks)**：启用 AI 断句优化（自动调整字体大小以减少断行）
-  - 需要配合 OpenAI/Gemini 翻译器使用
+  - 需要配合 OpenAI/Gemini/Vertex 翻译器使用
   - AI 会自动优化文本断行，提升文本可读性
 
 - **AI断句检查 (check_br_and_retry)**：检查 AI 断句结果并重试（确保断句质量）
@@ -594,12 +594,12 @@
 - **用户自定义提示词**（在界面中选择）：
   - `dict/prompt_example.yaml` - 提示词示例
   - 可以在此目录添加自己的 `.yaml` 或 `.json` 提示词文件
-- 适用于：OpenAI、Gemini、高质量翻译 OpenAI、高质量翻译 Gemini 四个翻译器
+- 适用于：OpenAI、Gemini、Vertex、高质量翻译 OpenAI、高质量翻译 Gemini、高质量翻译 Vertex 六个翻译器
 - 可以自定义翻译风格、术语表、上下文说明等
 
 **如何添加自定义提示词**：
 
-> 💡 **说明**：此提示词适用于以下 4 个翻译器：**OpenAI**、**Gemini**、**高质量翻译 OpenAI**、**高质量翻译 Gemini**。
+> 💡 **说明**：此提示词适用于以下 6 个翻译器：**OpenAI**、**Gemini**、**Vertex**、**高质量翻译 OpenAI**、**高质量翻译 Gemini**、**高质量翻译 Vertex**。
 
 > ⚠️ **重要**：使用脚本版安装的用户，**不要直接修改** `prompt_example.yaml`，更新时会被覆盖！请新建文件。
 
@@ -682,4 +682,3 @@ glossary:
 **输出文件夹**：
 - 默认：与输入文件相同目录
 - 可以在界面中自定义输出路径
-

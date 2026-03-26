@@ -588,3 +588,21 @@ class ConfigManagementService:
         except Exception as e:
             logger.error(f"Failed to apply preset to user: {e}")
             return False
+
+    def clear_user_selected_preset(self, user_id: str) -> bool:
+        """Clear the user's explicitly selected preset and fall back to group/server defaults."""
+        try:
+            existing = self.user_config_repo.get_user_config(user_id)
+            if not existing:
+                return True
+
+            return self.user_config_repo.update_user_config(
+                user_id,
+                {
+                    "selected_preset_id": None,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        except Exception as e:
+            logger.error(f"Failed to clear selected preset for user: {e}")
+            return False

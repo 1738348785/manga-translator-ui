@@ -12,12 +12,16 @@ from .openai import OpenAITranslator
 from .openai_hq import OpenAIHighQualityTranslator
 from .original import OriginalTranslator
 from .sakura import SakuraTranslator
+from .vertex import VertexTranslator
+from .vertex_hq import VertexHighQualityTranslator
 
 GPT_TRANSLATORS = {
     Translator.openai: OpenAITranslator,
     Translator.openai_hq: OpenAIHighQualityTranslator,
     Translator.gemini: GeminiTranslator,
     Translator.gemini_hq: GeminiHighQualityTranslator,
+    Translator.vertex: VertexTranslator,
+    Translator.vertex_hq: VertexHighQualityTranslator,
 }
 
 TRANSLATORS = {
@@ -27,11 +31,16 @@ TRANSLATORS = {
     **GPT_TRANSLATORS,
 }
 translator_cache = {}
+NON_CACHED_TRANSLATORS = {
+    key for key in TRANSLATORS.keys() if key not in {Translator.none, Translator.original}
+}
 
 def get_translator(key: Translator, *args, **kwargs) -> CommonTranslator:
     if key not in TRANSLATORS:
         raise ValueError(f'Could not find translator for: "{key}". Choose from the following: %s' % ','.join(TRANSLATORS))
-    # Use cache to avoid reloading models in the same translation session
+    if key in NON_CACHED_TRANSLATORS:
+        return TRANSLATORS[key](*args, **kwargs)
+    # Stateless translators can be safely reused.
     if key not in translator_cache:
         translator = TRANSLATORS[key]
         translator_cache[key] = translator(*args, **kwargs)
@@ -65,7 +74,7 @@ async def dispatch(chain: TranslatorChain, queries: List[str], config: Config, u
     for key, tgt_lang in chain.chain:
         translator = get_translator(key)
         translator.parse_args(config)
-        if key.value in ["gemini_hq", "openai_hq"]:
+        if key.value in ["gemini_hq", "openai_hq", "vertex_hq"]:
             queries = await translator.translate('auto', tgt_lang, queries, ctx=args)
         else:
             # 传递ctx参数（用于AI断句）

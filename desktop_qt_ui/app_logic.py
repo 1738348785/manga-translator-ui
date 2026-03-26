@@ -1049,7 +1049,7 @@ class MainAppLogic(QObject):
                 return await self._test_gemini_image_api(api_key, api_base, model, normalized_key)
             if self._is_openai_compatible_target(normalized_key):
                 return await self._test_openai_text_api(api_key, api_base, model)
-            if "gemini" in normalized_key:
+            if "gemini" in normalized_key or "vertex" in normalized_key:
                 return await self._test_gemini_text_api(api_key, api_base, model)
             if "sakura" in normalized_key:
                 # Sakura使用OpenAI兼容API
@@ -1120,7 +1120,7 @@ class MainAppLogic(QObject):
                 finally:
                     await client.close()
             
-            elif "gemini" in normalized_key:
+            elif "gemini" in normalized_key or "vertex" in normalized_key:
                 # Gemini API - 使用 curl_cffi 绕过 TLS 指纹检测，使用 Google Gemini 认证格式
                 try:
                     from manga_translator.translators.common import AsyncGeminiCurlCffi
@@ -1336,6 +1336,8 @@ class MainAppLogic(QObject):
                     "openai_hq": self._t("translator_openai_hq"),
                     "gemini": "Google Gemini",
                     "gemini_hq": self._t("translator_gemini_hq"),
+                    "vertex": self._t("translator_vertex"),
+                    "vertex_hq": self._t("translator_vertex_hq"),
                     "sakura": "Sakura",
                     "none": self._t("translator_none"),
                     "original": self._t("translator_original"),
@@ -1479,6 +1481,8 @@ class MainAppLogic(QObject):
                     "GEMINI_API_KEY": self._t("label_GEMINI_API_KEY"),
                     "GEMINI_MODEL": self._t("label_GEMINI_MODEL"),
                     "GEMINI_API_BASE": self._t("label_GEMINI_API_BASE"),
+                    "VERTEX_API_KEY": self._t("label_VERTEX_API_KEY"),
+                    "VERTEX_MODEL": self._t("label_VERTEX_MODEL"),
                     "SAKURA_API_BASE": self._t("label_SAKURA_API_BASE"),
                     "SAKURA_DICT_PATH": self._t("label_SAKURA_DICT_PATH"),
                     "CUSTOM_OPENAI_API_BASE": self._t("label_CUSTOM_OPENAI_API_BASE"),
@@ -3436,7 +3440,7 @@ class TranslationWorker(QObject):
             self._log_info("--- 配置对象创建完成")
 
             translator_type = config.translator.translator
-            is_hq = translator_type in [Translator.openai_hq, Translator.gemini_hq]
+            is_hq = translator_type in [Translator.openai_hq, Translator.gemini_hq, Translator.vertex_hq]
             batch_size = self.config_dict.get('cli', {}).get('batch_size', 1)
 
             # 准备save_info（所有模式都需要）

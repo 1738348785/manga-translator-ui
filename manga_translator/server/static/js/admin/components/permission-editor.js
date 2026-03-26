@@ -66,7 +66,7 @@ class PermissionEditor {
         return null;
     }
     
-    async show(existingConfig = {}, groupConfig = null, parentParamConfig = null, parentTranslatorConfig = null, groupName = null) {
+    async show(existingConfig = {}, groupConfig = null, parentParamConfig = null, parentFeatureConfig = null, groupName = null) {
         await this.loadData();
         
         // 保存用户组名称（用于用户模式显示）
@@ -75,7 +75,7 @@ class PermissionEditor {
         // 保存上级参数配置（用于继承判断）
         this.parentParameterConfig = parentParamConfig || {};
         // 保存上级翻译器配置（用于继承判断）
-        this.parentTranslatorConfig = parentTranslatorConfig || {};
+        this.parentFeatureConfig = parentFeatureConfig || {};
         
         // 如果是编辑用户，用用户组配置作为基础
         if (this.mode === 'user' && groupConfig) {
@@ -208,10 +208,20 @@ class PermissionEditor {
     }
     
     // 获取选项的翻译文本
+    formatFeatureLabel(value) {
+        const translated = this.t(`translator_${value}`, `translator_${value}`);
+        if (translated !== `translator_${value}`) {
+            return translated;
+        }
+        return String(value)
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, letter => letter.toUpperCase());
+    }
+
     getOptionLabel(key, value) {
-        // 翻译器选项
-        if (key === 'translator') {
-            return this.t(`translator_${value}`, value);
+        // 能力选项
+        if (key === 'translator' || key === 'ocr' || key === 'secondary_ocr' || key === 'renderer' || key === 'colorizer') {
+            return this.formatFeatureLabel(value);
         }
         // 语言选项
         if (key === 'target_lang' || key === 'keep_lang') {
@@ -595,18 +605,51 @@ class PermissionEditor {
                 ${this.renderPresetSelector()}
             </div>
         ` : '';
-        
-        // 翻译器选择器（用户组模式和用户模式都显示）
-        const translatorHint = this.mode === 'user' 
-            ? '继承用户组设置，勾选可解锁被禁用的翻译器（白名单），取消勾选可额外禁用（黑名单）'
-            : '选择允许使用的翻译器，未选中的翻译器将被禁用';
-        const translatorSection = `
+
+        const groupHint = this.mode === 'user'
+            ? '继承用户组设置，勾选可解锁被禁用的能力（白名单），取消勾选可额外禁用（黑名单）'
+            : '选择允许使用的能力，未选中的选项将被禁用';
+
+        const featureSections = [
+            {
+                icon: '🔄',
+                title: this.t('label_translator', '翻译器权限'),
+                optionKey: 'translator',
+                allowedKey: 'allowed_translators',
+                deniedKey: 'denied_translators',
+                allLabel: '允许所有翻译器',
+            },
+            {
+                icon: '🔎',
+                title: this.t('label_ocr', 'OCR 权限'),
+                optionKey: 'ocr',
+                allowedKey: 'allowed_ocr',
+                deniedKey: 'denied_ocr',
+                allLabel: '允许所有 OCR',
+            },
+            {
+                icon: '🎨',
+                title: this.t('label_colorizer', '上色权限'),
+                optionKey: 'colorizer',
+                allowedKey: 'allowed_colorizers',
+                deniedKey: 'denied_colorizers',
+                allLabel: '允许所有上色器',
+            },
+            {
+                icon: '🖋️',
+                title: this.t('label_renderer', '渲染权限'),
+                optionKey: 'renderer',
+                allowedKey: 'allowed_renderers',
+                deniedKey: 'denied_renderers',
+                allLabel: '允许所有渲染器',
+            },
+        ].map(section => `
             <div class="form-section">
-                <h3>🔄 ${this.t('label_translator', '翻译器权限')}</h3>
-                <p style="font-size:12px;color:#6b7280;margin-bottom:12px;">${translatorHint}</p>
-                ${this.renderTranslatorSelector()}
+                <h3>${section.icon} ${section.title}</h3>
+                <p style="font-size:12px;color:#6b7280;margin-bottom:12px;">${groupHint}</p>
+                ${this.renderFeatureSelector(section)}
             </div>
-        `;
+        `).join('');
         
         // 工作流选择器（用户组模式和用户模式都显示）
         const workflowHint = this.mode === 'user'
@@ -622,8 +665,18 @@ class PermissionEditor {
         
         return `
             ${presetSection}
-            ${translatorSection}
+            ${featureSections}
             ${workflowSection}
+            <div class="form-section">
+                <h3>🔐 ${this.t('API Keys (.env)', 'API 密钥')}</h3>
+                <p style="font-size:12px;color:#6b7280;margin-bottom:12px;">
+                    用户主页生效顺序：用户填写 > 当前预设 > 服务器默认。OCR、上色、渲染专用 Key 留空时，会继续回落到对应提供商的通用翻译 Key。
+                </p>
+                ${this.createFormRowSimple('允许用户在主页编辑 API Keys', this.createCheckbox('permissions', 'show_env_editor'), '关闭后，用户主页不显示 API Keys 标签页')}
+                ${this.createFormRowSimple('允许使用服务器默认 API Keys', this.createCheckbox('permissions', 'allow_server_keys'), '关闭后，用户只能依赖预设或自己填写的 Key')}
+                ${this.createFormRowSimple('强制用户提供 API Keys 或预设', this.createCheckbox('permissions', 'require_user_keys'), '开启后，没有用户 Key 且没有预设时会直接拒绝请求')}
+                ${this.createFormRowSimple('允许把用户填写的 API Keys 保存到服务器', this.createCheckbox('permissions', 'save_user_keys_to_server'), '会写入服务器 .env 并影响全局，多用户环境不建议开启')}
+            </div>
             <div class="form-section">
                 <h3>${this.t('web_resource_management', '资源管理')}</h3>
                 ${this.createFormRowSimple(this.t('web_can_upload_font', '可上传字体'), this.createCheckbox('permissions', 'can_upload_fonts'))}
@@ -691,54 +744,43 @@ class PermissionEditor {
             list.style.pointerEvents = allowAll ? 'none' : 'auto';
         }
     }
-    
-    // 渲染翻译器选择器
-    renderTranslatorSelector() {
-        const translators = this.configOptions?.translator || [];
-        
-        // 获取当前配置
-        const allowedTranslators = this.baseConfig?.allowed_translators || ['*'];
-        const deniedTranslators = this.baseConfig?.denied_translators || [];
-        
-        // 上级配置（用户模式下）
-        const parentAllowed = this.parentTranslatorConfig?.allowed_translators || ['*'];
-        const parentDenied = this.parentTranslatorConfig?.denied_translators || [];
-        
-        const isAllAllowed = allowedTranslators.includes('*');
-        
+
+    renderFeatureSelector({ optionKey, allowedKey, deniedKey, allLabel }) {
+        const options = this.configOptions?.[optionKey] || [];
+        const allowedValues = this.baseConfig?.[allowedKey] || ['*'];
+        const deniedValues = this.baseConfig?.[deniedKey] || [];
+        const parentAllowed = this.parentFeatureConfig?.[allowedKey] || ['*'];
+        const parentDenied = this.parentFeatureConfig?.[deniedKey] || [];
+        const listId = `${optionKey}-permission-list`;
+        const checkboxClass = `${optionKey}-permission-cb`;
+        const dataAttr = optionKey === 'translator' ? 'translator' : 'feature-value';
+        const isAllAllowed = allowedValues.includes('*') || allowedValues.length === 0;
+
         let html = `
             <div class="translator-selector">
                 <div class="form-row" style="margin-bottom:12px;">
                     <label style="display:flex;align-items:center;gap:8px;">
-                        <input type="checkbox" id="translator-allow-all" ${isAllAllowed ? 'checked' : ''} onchange="window._permEditor.toggleAllTranslators(this.checked)">
-                        <span>允许所有翻译器</span>
+                        <input type="checkbox" id="${optionKey}-allow-all" ${isAllAllowed ? 'checked' : ''} onchange="window._permEditor.toggleAllFeatureOptions('${listId}', this.checked)">
+                        <span>${allLabel}</span>
                     </label>
                 </div>
-                <div id="translator-list" class="translator-list" style="${isAllAllowed ? 'opacity:0.5;pointer-events:none;' : ''}">
+                <div id="${listId}" class="translator-list" style="${isAllAllowed ? 'opacity:0.5;pointer-events:none;' : ''}">
         `;
-        
-        for (const t of translators) {
-            // 计算翻译器状态
-            let isAllowed = isAllAllowed || allowedTranslators.includes(t);
-            let isDenied = deniedTranslators.includes(t);
-            
-            // 用户模式下的继承逻辑
+
+        for (const value of options) {
+            const isAllowed = isAllAllowed || allowedValues.includes(value);
+            const isDenied = deniedValues.includes(value);
+
             let inheritedDenied = false;
-            let isWhitelist = false;
             if (this.mode === 'user') {
-                const parentIsAllAllowed = parentAllowed.includes('*');
-                const parentAllowsThis = parentIsAllAllowed || parentAllowed.includes(t);
-                inheritedDenied = parentDenied.includes(t) || !parentAllowsThis;
-                
-                // 如果上级禁用了，但当前允许了，就是白名单
-                if (inheritedDenied && isAllowed && !isDenied) {
-                    isWhitelist = true;
-                }
+                const parentIsAllAllowed = parentAllowed.includes('*') || parentAllowed.length === 0;
+                const parentAllowsThis = parentIsAllAllowed || parentAllowed.includes(value);
+                inheritedDenied = parentDenied.includes(value) || !parentAllowsThis;
             }
-            
+
             const checked = isAllowed && !isDenied;
-            const label = this.t(`translator_${t}`, t);
-            
+            const label = this.formatFeatureLabel(value);
+
             let extraClass = '';
             let title = '';
             if (this.mode === 'user' && inheritedDenied) {
@@ -750,26 +792,25 @@ class PermissionEditor {
                     title = '已为此用户开启（白名单覆盖用户组禁用）';
                 }
             }
-            
+
             html += `
                 <label class="translator-item${extraClass}" title="${title}">
-                    <input type="checkbox" class="translator-cb" data-translator="${t}" data-parent-denied="${inheritedDenied}" ${checked ? 'checked' : ''}>
+                    <input type="checkbox" class="${checkboxClass}" data-${dataAttr}="${value}" data-parent-denied="${inheritedDenied}" ${checked ? 'checked' : ''}>
                     <span>${this.escapeHtml(label)}</span>
                 </label>
             `;
         }
-        
+
         html += `
                 </div>
             </div>
         `;
-        
+
         return html;
     }
-    
-    // 切换所有翻译器
-    toggleAllTranslators(allowAll) {
-        const list = document.getElementById('translator-list');
+
+    toggleAllFeatureOptions(listId, allowAll) {
+        const list = document.getElementById(listId);
         if (list) {
             list.style.opacity = allowAll ? '0.5' : '1';
             list.style.pointerEvents = allowAll ? 'none' : 'auto';
@@ -793,8 +834,8 @@ class PermissionEditor {
         const deniedWorkflows = this.baseConfig?.denied_workflows || [];
         
         // 上级配置（用户模式下）
-        const parentAllowed = this.parentTranslatorConfig?.allowed_workflows || ['*'];
-        const parentDenied = this.parentTranslatorConfig?.denied_workflows || [];
+        const parentAllowed = this.parentFeatureConfig?.allowed_workflows || ['*'];
+        const parentDenied = this.parentFeatureConfig?.denied_workflows || [];
         
         const isAllAllowed = allowedWorkflows.includes('*') || allowedWorkflows.length === 0;
         
@@ -1104,10 +1145,10 @@ class PermissionEditor {
             }
         }
         
-        // 收集翻译器配置
-        const translatorConfig = this.collectTranslatorConfig();
-        if (translatorConfig) {
-            Object.assign(data, translatorConfig);
+        // 收集能力权限配置
+        const featureConfig = this.collectFeatureConfig();
+        if (featureConfig) {
+            Object.assign(data, featureConfig);
         }
         
         // 收集工作流配置
@@ -1205,62 +1246,89 @@ class PermissionEditor {
         }
     }
     
-    // 收集翻译器配置
-    collectTranslatorConfig() {
+    collectFeatureConfig() {
         const modal = document.getElementById(this.modalId);
-        const allowAllCb = modal.querySelector('#translator-allow-all');
-        
-        if (!allowAllCb) return null;
-        
-        const allowAll = allowAllCb.checked;
-        
-        if (this.mode === 'group') {
-            // 用户组模式：直接设置白名单/黑名单
-            if (allowAll) {
-                return {
-                    allowed_translators: ['*'],
-                    denied_translators: []
-                };
-            } else {
+        const featureConfigs = [
+            {
+                optionKey: 'translator',
+                allowedKey: 'allowed_translators',
+                deniedKey: 'denied_translators',
+                checkboxClass: '.translator-permission-cb',
+                dataKey: 'translator',
+            },
+            {
+                optionKey: 'ocr',
+                allowedKey: 'allowed_ocr',
+                deniedKey: 'denied_ocr',
+                checkboxClass: '.ocr-permission-cb',
+                dataKey: 'featureValue',
+            },
+            {
+                optionKey: 'colorizer',
+                allowedKey: 'allowed_colorizers',
+                deniedKey: 'denied_colorizers',
+                checkboxClass: '.colorizer-permission-cb',
+                dataKey: 'featureValue',
+            },
+            {
+                optionKey: 'renderer',
+                allowedKey: 'allowed_renderers',
+                deniedKey: 'denied_renderers',
+                checkboxClass: '.renderer-permission-cb',
+                dataKey: 'featureValue',
+            },
+        ];
+
+        const result = {};
+
+        featureConfigs.forEach(feature => {
+            const allowAllCb = modal.querySelector(`#${feature.optionKey}-allow-all`);
+            if (!allowAllCb) {
+                return;
+            }
+
+            if (this.mode === 'group') {
+                if (allowAllCb.checked) {
+                    result[feature.allowedKey] = ['*'];
+                    result[feature.deniedKey] = [];
+                    return;
+                }
+
                 const allowed = [];
                 const denied = [];
-                modal.querySelectorAll('.translator-cb').forEach(cb => {
-                    const translator = cb.dataset.translator;
+                modal.querySelectorAll(feature.checkboxClass).forEach(cb => {
+                    const value = cb.dataset[feature.dataKey];
                     if (cb.checked) {
-                        allowed.push(translator);
+                        allowed.push(value);
                     } else {
-                        denied.push(translator);
+                        denied.push(value);
                     }
                 });
-                return {
-                    allowed_translators: allowed.length > 0 ? allowed : [],
-                    denied_translators: denied
-                };
+
+                result[feature.allowedKey] = allowed.length > 0 ? allowed : [];
+                result[feature.deniedKey] = denied;
+                return;
             }
-        } else {
-            // 用户模式：处理白名单/黑名单覆盖
-            const allowedTranslators = [];  // 用户白名单（解锁用户组禁用的）
-            const deniedTranslators = [];   // 用户黑名单（额外禁用的）
-            
-            modal.querySelectorAll('.translator-cb').forEach(cb => {
-                const translator = cb.dataset.translator;
+
+            const allowed = [];
+            const denied = [];
+            modal.querySelectorAll(feature.checkboxClass).forEach(cb => {
+                const value = cb.dataset[feature.dataKey];
                 const parentDenied = cb.dataset.parentDenied === 'true';
                 const isChecked = cb.checked;
-                
+
                 if (parentDenied && isChecked) {
-                    // 用户组禁用了，但用户允许了 = 白名单
-                    allowedTranslators.push(translator);
+                    allowed.push(value);
                 } else if (!parentDenied && !isChecked) {
-                    // 用户组允许了，但用户禁用了 = 黑名单
-                    deniedTranslators.push(translator);
+                    denied.push(value);
                 }
             });
-            
-            return {
-                allowed_translators: allowedTranslators.length > 0 ? allowedTranslators : ['*'],
-                denied_translators: deniedTranslators
-            };
-        }
+
+            result[feature.allowedKey] = allowed.length > 0 ? allowed : ['*'];
+            result[feature.deniedKey] = denied;
+        });
+
+        return result;
     }
     
     save() {

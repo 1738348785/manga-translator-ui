@@ -138,6 +138,8 @@ The English companion versions of the documents below are being added one by one
 
 #### Method 3: Docker Deployment (Experimental)
 
+> 💡 **Note**: the commands below are fine for a quick trial. For a real Web UI deployment, mount the persistent paths listed below.
+
 **Quick start**:
 
 ```bash
@@ -164,6 +166,13 @@ This project publishes Docker images to two registries. Use whichever is faster 
 
 - 🌐 User UI: `http://localhost:8000`
 - 🔧 Admin UI: `http://localhost:8000/admin`
+
+**Recommended Web UI persistence**:
+
+- Required directories: `/app/manga_translator/server/data`, `/app/examples`, `/app/dict`, `/app/fonts`, `/app/models`
+- Optional directories: `/app/logs`, `/app/result`
+- Optional file: `/app/.env`. Mount this too if you want server API keys saved from the Web UI to survive container recreation
+- `server/data` now also contains `admin_config.json`, `user_resources/`, accounts, sessions, groups, permissions, quotas, API key presets, user configs, and translation-history metadata
 
 > 📖 **Detailed installation**: [Docker deployment section](doc/en/INSTALLATION.md#method-4-docker-deployment)
 >  

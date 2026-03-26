@@ -123,6 +123,8 @@ class Translator(str, Enum):
     openai_hq = "openai_hq"
     gemini = "gemini"
     gemini_hq = "gemini_hq"
+    vertex = "vertex"
+    vertex_hq = "vertex_hq"
     sakura = "sakura"
     none = "none"
     original = "original"
@@ -465,6 +467,8 @@ class Config(BaseModel):
     """By how much to extend the text mask to remove left-over text pixels of the original image."""
     use_custom_api_params: bool = False
     """Use custom API parameters from examples/custom_api_params.json for supported AI backends."""
+    _runtime_api_overrides: dict[str, dict[str, dict[str, str]]] = PrivateAttr(default_factory=dict)
+    _allow_server_api_keys: bool = PrivateAttr(default=True)
 
     @model_validator(mode="before")
     @classmethod

@@ -124,12 +124,13 @@ You can add input pages in three ways:
 4. Recommended first choices:
    - `OpenAI High Quality`
    - `Gemini High Quality`
-   - `OpenAI` or `Google Gemini` if you want a lighter text-only workflow
+   - `OpenAI`, `Google Gemini`, or `Vertex` if you want a lighter text-only workflow
 
 > 💡 Important:
 > - High-quality translators require multimodal models
 > - DeepSeek and similar text-only models do not work as `OpenAI High Quality` / `Gemini High Quality`
 > - Online translators require API setup in `API Management`
+> - `Vertex` and `Vertex High Quality` use the fixed official Gemini host and only need `VERTEX_API_KEY` plus `VERTEX_MODEL`
 
 ### Choose the target language
 
@@ -179,6 +180,7 @@ These require API keys.
 |--------|------|------|------|------|
 | `OpenAI` | GPT-family text models | Medium | High | Easy to configure |
 | `Google Gemini` | Gemini-family text models | Low to medium | High | Easy to configure |
+| `Vertex` | Gemini-family text models with separate `VERTEX_*` settings | Low to medium | High | Easy to configure |
 | `Sakura` | Japanese-oriented | Medium | High | Good for Japanese-focused workflows |
 
 ### High-quality translators
@@ -189,6 +191,7 @@ These use image context and usually give the best results.
 |--------|------|------|
 | `OpenAI High Quality` | GPT-4o-class multimodal | Best context understanding |
 | `Gemini High Quality` | Gemini multimodal | Strong image-aware translation |
+| `Vertex High Quality` | Gemini multimodal | Strong image-aware translation with separate `VERTEX_*` credentials |
 
 **Why use high-quality translators**
 
@@ -208,6 +211,8 @@ If the translator requires keys:
    - `OpenAI API Base`
    - `Gemini API Key`
    - `Gemini Model`
+   - `Vertex API Key`
+   - `Vertex Model`
 3. Return to `Translation Interface`
 
 Detailed API setup:
@@ -492,7 +497,7 @@ Possible reasons:
 
 Try this:
 
-1. Switch to `OpenAI High Quality` or `Gemini High Quality`
+1. Switch to `OpenAI High Quality`, `Gemini High Quality`, or `Vertex High Quality`
 2. Use `Export Original Text` for a manual translation workflow
 3. Edit the result in `Editor View`
 4. Use prompt files from `Prompt Management`

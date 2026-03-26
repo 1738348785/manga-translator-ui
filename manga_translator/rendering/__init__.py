@@ -13,6 +13,7 @@ from shapely.geometry import Polygon
 from tqdm import tqdm
 
 from ..config import Config, Renderer
+from ..server_paths import normalize_server_resource_path
 
 # 只使用 freetype 渲染器（稳定可靠）
 from ..utils import (
@@ -45,6 +46,7 @@ def _resolve_font_path(font_path: str) -> str:
     """
     if not font_path:
         return ''
+    font_path = normalize_server_resource_path(font_path)
     if os.path.exists(font_path):
         return font_path
 

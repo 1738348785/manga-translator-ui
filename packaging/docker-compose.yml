@@ -28,9 +28,12 @@ services:
       - ./data/result:/app/result
       - ./data/models:/app/models
       - ./data/logs:/app/logs
+      - ./data/server:/app/manga_translator/server/data
       # 配置文件
       - ./data/config:/app/examples
-      - ./data/admin_config.json:/app/manga_translator/server/admin_config.json
+      # 如果要让 Web 管理界面里保存的服务器 API Keys 在重建容器后保留，
+      # 请先创建空文件 ./data/app.env ，再取消下面这行注释：
+      # - ./data/app.env:/app/.env
     # 内存限制配置（根据实际服务器内存调整）
     deploy:
       resources:
@@ -76,9 +79,12 @@ services:
       - ./data/result:/app/result
       - ./data/models:/app/models
       - ./data/logs:/app/logs
+      - ./data/server:/app/manga_translator/server/data
       # 配置文件
       - ./data/config:/app/examples
-      - ./data/admin_config.json:/app/manga_translator/server/admin_config.json
+      # 如果要让 Web 管理界面里保存的服务器 API Keys 在重建容器后保留，
+      # 请先创建空文件 ./data/app.env ，再取消下面这行注释：
+      # - ./data/app.env:/app/.env
     deploy:
       resources:
         limits:

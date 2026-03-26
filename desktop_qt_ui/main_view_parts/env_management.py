@@ -68,11 +68,13 @@ def get_env_default_placeholder(self, key: str) -> str:
         "OPENAI_MODEL": "gpt-4o",
         "CUSTOM_OPENAI_MODEL": "qwen2.5:7b",
         "GEMINI_MODEL": "gemini-1.5-flash-002",
+        "VERTEX_MODEL": "gemini-1.5-flash-002",
         "GROQ_MODEL": "mixtral-8x7b-32768",
         "DEEPSEEK_MODEL": "deepseek-chat",
         "OPENAI_API_KEY": key_placeholder,
         "CUSTOM_OPENAI_API_KEY": key_placeholder,
         "GEMINI_API_KEY": key_placeholder,
+        "VERTEX_API_KEY": key_placeholder,
         "GROQ_API_KEY": key_placeholder,
         "DEEPSEEK_API_KEY": key_placeholder,
         "DEEPL_AUTH_KEY": key_placeholder,
@@ -113,6 +115,7 @@ def _detect_test_target(env_key: str, translator_key: str) -> str:
         "DEEPSEEK": "deepseek",
         "GROQ": "groq",
         "GEMINI": "gemini",
+        "VERTEX": "vertex",
         "SAKURA": "sakura",
     }
     target = provider_targets.get(provider)
@@ -126,6 +129,8 @@ def _detect_test_target(env_key: str, translator_key: str) -> str:
 def _get_api_address_example(api_type: str) -> str:
     normalized = (api_type or "").lower()
     if "gemini" in normalized:
+        return "https://generativelanguage.googleapis.com"
+    if "vertex" in normalized:
         return "https://generativelanguage.googleapis.com"
     if "deepseek" in normalized:
         return "https://api.deepseek.com"
@@ -260,7 +265,7 @@ def _split_env_key(env_key: str) -> tuple[str, str, str]:
             normalized_key = normalized_key[len(prefix):]
             break
 
-    for provider in ("CUSTOM_OPENAI", "OPENAI", "GEMINI", "DEEPSEEK", "GROQ", "SAKURA"):
+    for provider in ("CUSTOM_OPENAI", "OPENAI", "GEMINI", "VERTEX", "DEEPSEEK", "GROQ", "SAKURA"):
         provider_prefix = f"{provider}_"
         if normalized_key.startswith(provider_prefix):
             field = normalized_key[len(provider_prefix):]

@@ -65,7 +65,7 @@
 
 - 🔍 **智能文本检测** - 自动识别漫画中的文字区域
 - 📝 **多语言 OCR** - 支持日语、中文、英语等多种语言
-- 🌐 **5 种翻译引擎** - OpenAI、Gemini（普通+高质量）、Sakura
+- 🌐 **多种翻译引擎** - OpenAI、Gemini、Vertex、Sakura（含高质量模式）
 - 🎯 **高质量翻译** - 支持 GPT-4o、Gemini 多模态 AI 翻译
 - 📚 **自动提取术语** - AI 自动识别并积累专有名词，保持翻译一致性
 - 🤖 **AI 智能断句** - 提升文本可读性，自动优化换行
@@ -136,6 +136,8 @@
 
 #### 方式三：Docker 部署（实验性）
 
+> 💡 **说明**：下面的命令适合临时体验。正式部署 Web UI 时，建议按下方“Web UI 持久化”说明挂载数据目录和配置文件。
+
 **快速启动**：
 ```bash
 # Windows CMD / PowerShell
@@ -159,7 +161,14 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 
 **访问地址**（默认端口 8000）：
 - 🌐 用户界面：`http://localhost:8000`
-- 🔧 管理界面：`http://localhost:8000/admin.html`
+- 🔧 管理界面：`http://localhost:8000/admin`
+
+**Web UI 持久化（推荐）**：
+
+- 必挂目录：`/app/manga_translator/server/data`、`/app/examples`、`/app/dict`、`/app/fonts`、`/app/models`
+- 可选目录：`/app/logs`、`/app/result`
+- 可选文件：`/app/.env`。如果你准备在 Web 管理界面里保存服务器 API Keys，必须额外挂这个文件
+- `server/data` 现在会统一保存 `admin_config.json`、`user_resources/`、账号、会话、用户组、权限、配额、API Key 预设、用户配置和翻译历史元数据
 
 > 📖 **详细安装教程**：[Docker 部署文档](doc/INSTALLATION.md#安装方式四docker部署)  
 > 📖 **使用教程**：[命令行使用指南](doc/CLI_USAGE.md)
@@ -260,6 +269,7 @@ chmod +x macOS_*.sh
 4. 添加图片
 5. 选择翻译器
    - 首次使用推荐：**高质量翻译 OpenAI** 或 **高质量翻译 Gemini**
+   - 如需单独管理 Google 官方 Key，也可使用 **高质量翻译 Vertex**
    - 需要配置 API Key，参考 [API 配置教程](doc/API_CONFIG.md)
 6. 开始翻译
 
@@ -316,11 +326,13 @@ python -m manga_translator --help
 ### 在线翻译器（需要 API Key）
 - **OpenAI** - 使用 GPT 系列模型
 - **Gemini** - 使用 Google Gemini 模型
+- **Vertex** - 使用固定 Google 官方 Gemini host，独立读取 `VERTEX_API_KEY` / `VERTEX_MODEL`
 - **Sakura** - 专门针对日语优化的翻译模型
 
 ### 高质量翻译器（推荐）
 - **高质量翻译 OpenAI** - 使用 GPT-4o 多模态模型
 - **高质量翻译 Gemini** - 使用 Gemini 多模态模型
+- **高质量翻译 Vertex** - 使用固定 Google 官方 Gemini host 的多模态路径
 - 📸 结合图片上下文，翻译更准确
 
 **完整设置说明** → [doc/SETTINGS.md](doc/SETTINGS.md)

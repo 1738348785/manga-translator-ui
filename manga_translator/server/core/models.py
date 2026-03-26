@@ -16,6 +16,22 @@ class UserPermissions:
     # 翻译器权限（白名单 + 黑名单）
     allowed_translators: List[str] = field(default_factory=lambda: ["*"])
     denied_translators: List[str] = field(default_factory=list)
+
+    # OCR 权限（白名单 + 黑名单）
+    allowed_ocr: List[str] = field(default_factory=list)
+    denied_ocr: List[str] = field(default_factory=list)
+
+    # 上色器权限（白名单 + 黑名单）
+    allowed_colorizers: List[str] = field(default_factory=list)
+    denied_colorizers: List[str] = field(default_factory=list)
+
+    # 渲染器权限（白名单 + 黑名单）
+    allowed_renderers: List[str] = field(default_factory=list)
+    denied_renderers: List[str] = field(default_factory=list)
+
+    # 工作流权限（白名单 + 黑名单）
+    allowed_workflows: List[str] = field(default_factory=list)
+    denied_workflows: List[str] = field(default_factory=list)
     
     # 参数权限（白名单 + 黑名单）
     allowed_parameters: List[str] = field(default_factory=lambda: ["*"])
@@ -42,6 +58,14 @@ class UserPermissions:
         return cls(
             allowed_translators=data.get('allowed_translators', ["*"]),
             denied_translators=data.get('denied_translators', []),
+            allowed_ocr=data.get('allowed_ocr', []),
+            denied_ocr=data.get('denied_ocr', []),
+            allowed_colorizers=data.get('allowed_colorizers', []),
+            denied_colorizers=data.get('denied_colorizers', []),
+            allowed_renderers=data.get('allowed_renderers', []),
+            denied_renderers=data.get('denied_renderers', []),
+            allowed_workflows=data.get('allowed_workflows', []),
+            denied_workflows=data.get('denied_workflows', []),
             allowed_parameters=data.get('allowed_parameters', ["*"]),
             denied_parameters=data.get('denied_parameters', []),
             max_concurrent_tasks=data.get('max_concurrent_tasks', 10),

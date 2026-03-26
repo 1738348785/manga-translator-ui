@@ -567,9 +567,10 @@ Notes:
 
 - The password must be at least 6 characters long
 - It only takes effect on the first startup when no admin password has been configured yet
-- The password is saved automatically to `manga_translator/server/admin_config.json`
+- The password is saved automatically to `manga_translator/server/data/admin_config.json`
 - Later startups use the saved password and no longer read the environment variable for initial setup
 - If you want to change the password later, use the admin panel's password change function
+- For a long-running Docker Web UI deployment, also persist `/app/manga_translator/server/data`, `/app/examples`, `/app/dict`, `/app/fonts`, and `/app/models`; admin config and user-uploaded resources now live under `server/data`. If you save server API keys from the Web UI, persist `/app/.env` too
 
 ### Core features
 

@@ -458,16 +458,44 @@ async def apply_preset(
         if not success:
             raise HTTPException(status_code=500, detail="Failed to apply preset")
         
+        preset_config = preset.get('config', {}) if isinstance(preset, dict) else {}
+        ui_config = {
+            key: value
+            for key, value in preset_config.items()
+            if not str(key).isupper()
+        } if isinstance(preset_config, dict) else {}
+
         # 返回预设配置供前端应用到UI
         return {
             "success": True,
             "message": "Preset applied successfully",
-            "config": preset.get('config', {}) if isinstance(preset, dict) else {}
+            "config": ui_config
         }
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to apply preset: {str(e)}")
+
+
+@router.delete("/config/user/preset")
+async def clear_selected_preset(
+    session = Depends(require_auth)
+):
+    """Clear the current user's selected preset."""
+    try:
+        user_id = session.username
+        success = config_service.clear_user_selected_preset(user_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to clear selected preset")
+
+        return {
+            "success": True,
+            "message": "Selected preset cleared successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to clear selected preset: {str(e)}")
 
 
 # ============================================================================

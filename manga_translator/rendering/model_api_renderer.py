@@ -12,6 +12,7 @@ from ..custom_api_params import (
     load_enabled_custom_api_params,
     split_gemini_request_params,
 )
+from ..runtime_api_resolver import resolve_runtime_api_config
 from ..translators.common import draw_text_boxes_on_image
 from ..utils import TextBlock, get_logger
 from ..utils.ai_image_preprocess import (
@@ -47,7 +48,6 @@ GEMINI_BROWSER_HEADERS = {
 }
 
 _RENDERER_SEMAPHORES: dict[str, tuple[int, asyncio.Semaphore]] = {}
-_RENDERER_CACHE: dict[Renderer, "BaseAPIRenderer"] = {}
 _LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 
 
@@ -71,6 +71,7 @@ class BaseAPIRenderer:
     BROWSER_HEADERS = {}
     PROVIDER_NAME = "API Renderer"
     ALLOW_EMPTY_LOCAL_API_KEY = False
+    RUNTIME_PROVIDER = ""
 
     def __init__(self):
         self.logger = get_logger("render")
@@ -90,7 +91,7 @@ class BaseAPIRenderer:
             except Exception:
                 pass
 
-    def _read_runtime_config(self):
+    def _read_runtime_config(self, runtime_config=None):
         try:
             from dotenv import load_dotenv
 
@@ -98,24 +99,33 @@ class BaseAPIRenderer:
         except Exception:
             pass
 
-        api_key = os.getenv(self.API_KEY_ENV) or os.getenv(self.FALLBACK_API_KEY_ENV)
-        base_url = (
-            os.getenv(self.API_BASE_ENV)
-            or os.getenv(self.FALLBACK_API_BASE_ENV)
-            or self.DEFAULT_API_BASE
+        return resolve_runtime_api_config(
+            runtime_config,
+            feature="renderer",
+            provider=self.RUNTIME_PROVIDER,
+            api_key_env=self.API_KEY_ENV,
+            api_base_env=self.API_BASE_ENV,
+            model_env=self.MODEL_ENV,
+            fallback_api_key_env=self.FALLBACK_API_KEY_ENV,
+            fallback_api_base_env=self.FALLBACK_API_BASE_ENV,
+            fallback_model_env=self.FALLBACK_MODEL_ENV,
+            default_api_base=self.DEFAULT_API_BASE,
+            default_model=self.DEFAULT_MODEL,
+            allow_empty_local_api_key=self.ALLOW_EMPTY_LOCAL_API_KEY,
         )
-        model_name = (
-            os.getenv(self.MODEL_ENV)
-            or os.getenv(self.FALLBACK_MODEL_ENV)
-            or self.DEFAULT_MODEL
-        )
-        if self.ALLOW_EMPTY_LOCAL_API_KEY:
-            api_key = resolve_openai_compatible_api_key(api_key, base_url)
-        return api_key, base_url.rstrip("/"), model_name
 
-    async def ensure_client(self):
+    def _missing_api_key_message(self) -> str:
+        message = f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env"
+        if self.FALLBACK_API_KEY_ENV:
+            message += f" (or fallback {self.FALLBACK_API_KEY_ENV})"
+        return message + "."
+
+    async def ensure_client(self, runtime_config=None):
         current_loop = asyncio.get_running_loop()
-        api_key, base_url, model_name = self._read_runtime_config()
+        settings = self._read_runtime_config(runtime_config)
+        api_key = settings.api_key
+        base_url = settings.base_url
+        model_name = settings.model_name
         signature = (api_key or "", base_url, model_name)
         if (
             self.client is not None
@@ -244,12 +254,9 @@ class BaseAPIRenderer:
         return None
 
     async def render(self, img: np.ndarray, text_regions: List[TextBlock], config) -> np.ndarray:
-        await self.ensure_client()
+        await self.ensure_client(config)
         if not self.client or not self.api_key:
-            raise RuntimeError(
-                f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env "
-                f"(or fallback {self.FALLBACK_API_KEY_ENV})."
-            )
+            raise RuntimeError(self._missing_api_key_message())
 
         renderable_regions = [
             region for region in text_regions if (getattr(region, "translation", "") or "").strip()
@@ -273,12 +280,9 @@ class BaseAPIRenderer:
 
         async with semaphore:
             async def _do_request() -> Image.Image:
-                await self.ensure_client()
+                await self.ensure_client(config)
                 if not self.client or not self.api_key:
-                    raise RuntimeError(
-                        f"{self.PROVIDER_NAME} is not configured. Set {self.API_KEY_ENV} in .env "
-                        f"(or fallback {self.FALLBACK_API_KEY_ENV})."
-                    )
+                    raise RuntimeError(self._missing_api_key_message())
                 return await self._request_rendered_image(
                     image=request_image,
                     prompt_text=prompt_text,
@@ -315,14 +319,15 @@ class OpenAIRenderer(BaseAPIRenderer):
     API_KEY_ENV = "RENDER_OPENAI_API_KEY"
     API_BASE_ENV = "RENDER_OPENAI_API_BASE"
     MODEL_ENV = "RENDER_OPENAI_MODEL"
-    FALLBACK_API_KEY_ENV = "OPENAI_API_KEY"
-    FALLBACK_API_BASE_ENV = "OPENAI_API_BASE"
-    FALLBACK_MODEL_ENV = "OPENAI_MODEL"
+    FALLBACK_API_KEY_ENV = ""
+    FALLBACK_API_BASE_ENV = ""
+    FALLBACK_MODEL_ENV = ""
     DEFAULT_API_BASE = "https://api.openai.com/v1"
     DEFAULT_MODEL = "gpt-image-1"
     BROWSER_HEADERS = OPENAI_BROWSER_HEADERS
     PROVIDER_NAME = "OpenAI Renderer"
     ALLOW_EMPTY_LOCAL_API_KEY = True
+    RUNTIME_PROVIDER = "openai"
 
     def _create_client(self, api_key: str, base_url: str):
         from ..translators.common import AsyncOpenAICurlCffi
@@ -363,13 +368,14 @@ class GeminiRenderer(BaseAPIRenderer):
     API_KEY_ENV = "RENDER_GEMINI_API_KEY"
     API_BASE_ENV = "RENDER_GEMINI_API_BASE"
     MODEL_ENV = "RENDER_GEMINI_MODEL"
-    FALLBACK_API_KEY_ENV = "GEMINI_API_KEY"
-    FALLBACK_API_BASE_ENV = "GEMINI_API_BASE"
-    FALLBACK_MODEL_ENV = "GEMINI_MODEL"
+    FALLBACK_API_KEY_ENV = ""
+    FALLBACK_API_BASE_ENV = ""
+    FALLBACK_MODEL_ENV = ""
     DEFAULT_API_BASE = "https://generativelanguage.googleapis.com"
     DEFAULT_MODEL = "gemini-2.0-flash-preview-image-generation"
     BROWSER_HEADERS = GEMINI_BROWSER_HEADERS
     PROVIDER_NAME = "Gemini Renderer"
+    RUNTIME_PROVIDER = "gemini"
     SAFETY_SETTINGS = [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF"},
         {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "OFF"},
@@ -429,19 +435,12 @@ class GeminiRenderer(BaseAPIRenderer):
 
 
 def get_api_renderer(key: Renderer) -> BaseAPIRenderer:
-    renderer = _RENDERER_CACHE.get(key)
-    if renderer is not None:
-        return renderer
-
     if key == Renderer.openai_renderer:
-        renderer = OpenAIRenderer()
+        return OpenAIRenderer()
     elif key == Renderer.gemini_renderer:
-        renderer = GeminiRenderer()
+        return GeminiRenderer()
     else:
         raise ValueError(f"Unsupported API renderer: {key}")
-
-    _RENDERER_CACHE[key] = renderer
-    return renderer
 
 
 async def dispatch_api_rendering(img: np.ndarray, text_regions: List[TextBlock], config) -> np.ndarray:

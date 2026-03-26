@@ -233,6 +233,12 @@ class UsersModule {
             ...user.parameter_config || {},
             allowed_translators: user.permissions?.allowed_translators || ['*'],
             denied_translators: user.permissions?.denied_translators || [],
+            allowed_ocr: user.permissions?.allowed_ocr || ['*'],
+            denied_ocr: user.permissions?.denied_ocr || [],
+            allowed_colorizers: user.permissions?.allowed_colorizers || ['*'],
+            denied_colorizers: user.permissions?.denied_colorizers || [],
+            allowed_renderers: user.permissions?.allowed_renderers || ['*'],
+            denied_renderers: user.permissions?.denied_renderers || [],
             allowed_workflows: user.permissions?.allowed_workflows || ['*'],
             denied_workflows: user.permissions?.denied_workflows || []
         };
@@ -248,6 +254,12 @@ class UsersModule {
             ...userGroup?.parameter_config || {},
             allowed_translators: userGroup?.allowed_translators || ['*'],
             denied_translators: userGroup?.denied_translators || [],
+            allowed_ocr: userGroup?.allowed_ocr || ['*'],
+            denied_ocr: userGroup?.denied_ocr || [],
+            allowed_colorizers: userGroup?.allowed_colorizers || ['*'],
+            denied_colorizers: userGroup?.denied_colorizers || [],
+            allowed_renderers: userGroup?.allowed_renderers || ['*'],
+            denied_renderers: userGroup?.denied_renderers || [],
             allowed_workflows: userGroup?.allowed_workflows || ['*'],
             denied_workflows: userGroup?.denied_workflows || []
         };
@@ -270,16 +282,22 @@ class UsersModule {
         }
         
         // 用户组的翻译器和工作流配置作为上级配置
-        const parentTranslatorConfig = {
+        const parentFeatureConfig = {
             allowed_translators: userGroup?.allowed_translators || ['*'],
             denied_translators: userGroup?.denied_translators || [],
+            allowed_ocr: userGroup?.allowed_ocr || ['*'],
+            denied_ocr: userGroup?.denied_ocr || [],
+            allowed_colorizers: userGroup?.allowed_colorizers || ['*'],
+            denied_colorizers: userGroup?.denied_colorizers || [],
+            allowed_renderers: userGroup?.allowed_renderers || ['*'],
+            denied_renderers: userGroup?.denied_renderers || [],
             allowed_workflows: userGroup?.allowed_workflows || ['*'],
             denied_workflows: userGroup?.denied_workflows || []
         };
 
         // 传递用户组名称
         const groupName = userGroup?.name || user.group || '默认';
-        editor.show(userConfig, groupConfig, parentParamConfig, parentTranslatorConfig, groupName);
+        editor.show(userConfig, groupConfig, parentParamConfig, parentFeatureConfig, groupName);
     }
     
     async saveUserConfig(username, config) {
@@ -293,6 +311,14 @@ class UsersModule {
         // 提取翻译器白名单和黑名单
         const allowedTranslators = config.allowed_translators || ['*'];
         const deniedTranslators = config.denied_translators || [];
+
+        // 提取 OCR / 上色 / 渲染白名单和黑名单
+        const allowedOcr = config.allowed_ocr || ['*'];
+        const deniedOcr = config.denied_ocr || [];
+        const allowedColorizers = config.allowed_colorizers || ['*'];
+        const deniedColorizers = config.denied_colorizers || [];
+        const allowedRenderers = config.allowed_renderers || ['*'];
+        const deniedRenderers = config.denied_renderers || [];
         
         // 提取工作流白名单和黑名单
         const allowedWorkflows = config.allowed_workflows || ['*'];
@@ -305,6 +331,12 @@ class UsersModule {
         delete paramConfig.denied_parameters;
         delete paramConfig.allowed_translators;
         delete paramConfig.denied_translators;
+        delete paramConfig.allowed_ocr;
+        delete paramConfig.denied_ocr;
+        delete paramConfig.allowed_colorizers;
+        delete paramConfig.denied_colorizers;
+        delete paramConfig.allowed_renderers;
+        delete paramConfig.denied_renderers;
         delete paramConfig.allowed_workflows;
         delete paramConfig.denied_workflows;
 
@@ -334,6 +366,12 @@ class UsersModule {
                     denied_parameters: deniedParams,
                     allowed_translators: allowedTranslators,
                     denied_translators: deniedTranslators,
+                    allowed_ocr: allowedOcr,
+                    denied_ocr: deniedOcr,
+                    allowed_colorizers: allowedColorizers,
+                    denied_colorizers: deniedColorizers,
+                    allowed_renderers: allowedRenderers,
+                    denied_renderers: deniedRenderers,
                     allowed_workflows: allowedWorkflows,
                     denied_workflows: deniedWorkflows
                 })

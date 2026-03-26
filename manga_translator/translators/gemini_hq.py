@@ -23,7 +23,6 @@ from .common import (
     parse_hq_response,
     validate_gemini_response,
 )
-from .keys import GEMINI_API_KEY
 
 # 浏览器风格的请求头，避免被 CF 拦截
 BROWSER_HEADERS = {
@@ -85,6 +84,14 @@ class GeminiHighQualityTranslator(CommonTranslator):
     支持多图片批量处理，提供文本框顺序、原文和原图给AI进行更精准的翻译
     """
     _LANGUAGE_CODE_MAP = VALID_LANGUAGES
+    API_KEY_ENV = "GEMINI_API_KEY"
+    API_BASE_ENV = "GEMINI_API_BASE"
+    MODEL_ENV = "GEMINI_MODEL"
+    DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+    DEFAULT_MODEL_NAME = "gemini-1.5-flash"
+    LOG_PROVIDER_NAME = "Gemini HQ"
+    LOG_PROVIDER_NAME_ZH = "Gemini高质量翻译"
+    STREAM_LOG_PREFIX = "[Gemini HQ Stream]"
     
     # 类变量: 跨实例共享的RPM限制时间戳
     _GLOBAL_LAST_REQUEST_TS = {}  # {model_name: timestamp}
@@ -100,14 +107,14 @@ class GeminiHighQualityTranslator(CommonTranslator):
             from dotenv import load_dotenv
             load_dotenv(override=True)
         
-        self.api_key = os.getenv('GEMINI_API_KEY', GEMINI_API_KEY)
-        self.base_url = os.getenv('GEMINI_API_BASE', 'https://generativelanguage.googleapis.com')
-        self.model_name = os.getenv('GEMINI_MODEL', "gemini-1.5-flash")
+        self.api_key = os.getenv(self.API_KEY_ENV, '')
+        self.base_url = os.getenv(self.API_BASE_ENV, self.DEFAULT_BASE_URL) if self.API_BASE_ENV else self.DEFAULT_BASE_URL
+        self.model_name = os.getenv(self.MODEL_ENV, self.DEFAULT_MODEL_NAME)
         self.max_tokens = None  # 不限制，使用模型默认最大值
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
         # 使用全局时间戳,跨实例共享
-        if self.model_name not in GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
-            GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
+        if self.model_name not in type(self)._GLOBAL_LAST_REQUEST_TS:
+            type(self)._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
         self._last_request_ts_key = self.model_name
         # 新版 SDK 的安全设置
         self.safety_settings = [
@@ -129,6 +136,12 @@ class GeminiHighQualityTranslator(CommonTranslator):
             ),
         ]
         self._setup_client()
+
+    def _log_provider_name(self) -> str:
+        return self.LOG_PROVIDER_NAME
+
+    def _log_provider_name_zh(self) -> str:
+        return self.LOG_PROVIDER_NAME_ZH
     
     def set_prev_context(self, context: str):
         """设置多页上下文（用于context_size > 0时）"""
@@ -147,7 +160,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
         max_rpm = self._get_config_value(translator_args, 'max_requests_per_minute', 0)
         if max_rpm > 0:
             self._MAX_REQUESTS_PER_MINUTE = max_rpm
-            self.logger.info(f"Setting Gemini HQ max requests per minute to: {max_rpm}")
+            self.logger.info(f"Setting {self._log_provider_name()} max requests per minute to: {max_rpm}")
         
         # 读取自定义API参数配置
         self._configure_custom_api_params(args)
@@ -160,7 +173,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
         if user_api_key and user_api_key != self.api_key:
             self.api_key = user_api_key
             need_rebuild_client = True
-            self.logger.info("[UserAPIKey] Using user-provided API key for Gemini HQ")
+            self.logger.info(f"[UserAPIKey] Using user-provided API key for {self._log_provider_name()}")
         
         user_api_base = self._get_config_value(translator_args, 'user_api_base', None)
         if user_api_base and user_api_base != self.base_url:
@@ -172,8 +185,8 @@ class GeminiHighQualityTranslator(CommonTranslator):
         if user_api_model:
             self.model_name = user_api_model
             # 更新全局时间戳的 key
-            if self.model_name not in GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
-                GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
+            if self.model_name not in type(self)._GLOBAL_LAST_REQUEST_TS:
+                type(self)._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
             self._last_request_ts_key = self.model_name
             self.logger.info(f"[UserAPIKey] Using user-provided model: {user_api_model}")
         
@@ -183,7 +196,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
             self._setup_client()
     
     def _setup_client(self, system_instruction=None):
-        """设置Gemini客户端"""
+        """设置高质量翻译客户端"""
         if not self.client and self.api_key:
             # 检查是否使用自定义 API Base
             is_custom_api = (
@@ -202,7 +215,9 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     stream_timeout=300
                 )
                 self._use_curl_cffi = True
-                self.logger.info(f"Gemini HQ客户端初始化完成（强制 curl_cffi，自定义API Base）。Base URL: {self.base_url}")
+                self.logger.info(
+                    f"{self._log_provider_name()}客户端初始化完成（强制 curl_cffi，自定义API Base）。Base URL: {self.base_url}"
+                )
             else:
                 self.client = AsyncGeminiCurlCffi(
                     api_key=self.api_key,
@@ -212,7 +227,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     stream_timeout=300
                 )
                 self._use_curl_cffi = True
-                self.logger.info("Gemini HQ客户端初始化完成（强制 curl_cffi 模式）")
+                self.logger.info(f"{self._log_provider_name()}客户端初始化完成（强制 curl_cffi 模式）")
 
             self.logger.info("安全设置策略：默认发送 OFF，如遇错误自动回退")
 
@@ -228,7 +243,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 if asyncio.iscoroutine(close_result):
                     await close_result
         except Exception as e:
-            self.logger.debug(f"中断Gemini HQ请求时关闭客户端失败（可忽略）: {e}")
+            self.logger.debug(f"中断{self._log_provider_name()}请求时关闭客户端失败（可忽略）: {e}")
         finally:
             self.client = None
 
@@ -327,7 +342,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
         # 标记是否发送图片（降级机制）
         send_images = len(image_parts) > 0
         if not send_images:
-            self.logger.info("未提供可用图片，Gemini HQ将使用纯文本请求模式")
+            self.logger.info(f"未提供可用图片，{self._log_provider_name()}将使用纯文本请求模式")
 
         while is_infinite or attempt < max_retries:
             # 检查是否被取消
@@ -364,7 +379,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 self._setup_client(system_instruction=None)
             
             if not self.client:
-                self.logger.error("Gemini客户端初始化失败")
+                self.logger.error(f"{self._log_provider_name()}客户端初始化失败")
                 return texts
             
             # 构建用户提示词（包含重试信息以避免缓存）
@@ -404,7 +419,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     import time
                     now = time.time()
                     delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
-                    elapsed = now - GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
+                    elapsed = now - type(self)._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
                     if elapsed < delay:
                         sleep_time = delay - elapsed
                         self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
@@ -414,7 +429,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     return getattr(chunk, "text", "") or ""
                 
                 def _on_stream_chunk(delta_text, _full_text):
-                    self._emit_stream_json_preview("[Gemini HQ Stream]", _full_text, source_texts=texts)
+                    self._emit_stream_json_preview(self.STREAM_LOG_PREFIX, _full_text, source_texts=texts)
 
                 response = None
                 streamed_text = None
@@ -499,7 +514,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 # 在API调用成功后立即更新时间戳，确保所有请求（包括重试）都被计入速率限制
                 if self._MAX_REQUESTS_PER_MINUTE > 0:
                     import time
-                    GeminiHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
+                    type(self)._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
 
                 if streamed_text is None:
                     # 验证响应对象是否有效
@@ -516,17 +531,17 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     attempt += 1
                     log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
 
-                    self.logger.warning(f"Gemini API失败 ({log_attempt}): {diagnostics_text}")
+                    self.logger.warning(f"{self._log_provider_name()} API失败 ({log_attempt}): {diagnostics_text}")
                     
                     if gemini_diagnostics_should_disable_images(diagnostics):
-                        self.logger.warning("检测到Gemini阻断或未知结束状态，下次重试将不再发送图片。")
+                        self.logger.warning(f"检测到{self._log_provider_name()}阻断或未知结束状态，下次重试将不再发送图片。")
                         send_images = False
                     if gemini_diagnostics_indicate_safety(diagnostics) and not should_retry_without_safety:
-                        self.logger.warning("检测到Gemini安全策略拦截，下次重试将移除安全设置参数。")
+                        self.logger.warning(f"检测到{self._log_provider_name()}安全策略拦截，下次重试将移除安全设置参数。")
                         should_retry_without_safety = True
 
                     if not is_infinite and attempt >= max_retries:
-                        self.logger.error(f"Gemini翻译在多次重试后仍失败: {diagnostics_text}")
+                        self.logger.error(f"{self._log_provider_name()}翻译在多次重试后仍失败: {diagnostics_text}")
                         break
                     await self._sleep_with_cancel_polling(1)
                     continue
@@ -542,14 +557,14 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 from .common import sanitize_text_encoding
                 result_text = sanitize_text_encoding(result_text)
                 
-                self.logger.debug(f"--- Gemini Raw Response ---\n{result_text}\n---------------------------")
+                self.logger.debug(f"--- {self._log_provider_name()} Raw Response ---\n{result_text}\n---------------------------")
                 if not result_text:
-                    self.logger.warning(f"Gemini返回空内容 ({diagnostics_text})，下次重试将不再发送图片")
+                    self.logger.warning(f"{self._log_provider_name()}返回空内容 ({diagnostics_text})，下次重试将不再发送图片")
                     send_images = False
                     if gemini_diagnostics_indicate_safety(diagnostics) and not should_retry_without_safety:
-                        self.logger.warning("空响应伴随Gemini安全策略信息，下次重试将移除安全设置参数。")
+                        self.logger.warning(f"空响应伴随{self._log_provider_name()}安全策略信息，下次重试将移除安全设置参数。")
                         should_retry_without_safety = True
-                    raise Exception(f"Gemini returned empty content ({diagnostics_text})")
+                    raise Exception(f"{self._log_provider_name()} returned empty content ({diagnostics_text})")
 
 
                 # 使用通用函数解析响应（支持JSON和纯文本，以及术语提取）
@@ -623,7 +638,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     # 如果达到最大重试次数，抛出友好的异常
                     if not is_infinite and attempt >= max_retries:
                         from .common import BRMarkersValidationException
-                        self.logger.error("Gemini高质量翻译在多次重试后仍然失败：AI断句检查失败。")
+                        self.logger.error(f"{self._log_provider_name_zh()}在多次重试后仍然失败：AI断句检查失败。")
                         raise BRMarkersValidationException(
                             missing_count=0,  # 具体数字在_validate_br_markers中已记录
                             total_count=len(texts),
@@ -661,7 +676,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 if is_bad_request and is_multimodal_unsupported:
                     self.logger.error(f"❌ 模型 {self.model_name} 不支持多模态输入（图片+文本）")
                     self.logger.error("💡 解决方案：")
-                    self.logger.error("   1. 使用支持多模态的Gemini模型（如 gemini-3-pro、gemini-3-flash）")
+                    self.logger.error(f"   1. 使用支持多模态的{self._log_provider_name()}模型")
                     self.logger.error("   2. 或者切换到普通翻译模式（不使用高质量翻译器）")
                     self.logger.error("   3. 检查第三方API是否支持图片输入")
                     raise Exception(f"模型不支持多模态输入: {self.model_name}") from e
@@ -676,15 +691,15 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     
                 attempt += 1
                 log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
-                self.logger.warning(f"Gemini高质量翻译出错 ({log_attempt}): {e}")
+                self.logger.warning(f"{self._log_provider_name_zh()}出错 ({log_attempt}): {e}")
 
                 if gemini_error_message_indicates_safety(error_message):
-                    self.logger.warning("检测到Gemini安全策略拦截。正在重试...")
+                    self.logger.warning(f"检测到{self._log_provider_name()}安全策略拦截。正在重试...")
                     send_images = False # 显式确保降级
                 
                 # 检查是否达到最大重试次数（注意：attempt已经+1了）
                 if not is_infinite and attempt >= max_retries:
-                    self.logger.error("Gemini翻译在多次重试后仍然失败。即将终止程序。")
+                    self.logger.error(f"{self._log_provider_name()}翻译在多次重试后仍然失败。即将终止程序。")
                     raise e
                 
                 await self._sleep_with_cancel_polling(1)
@@ -707,7 +722,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
         batch_data = getattr(ctx, 'high_quality_batch_data', None) if ctx else None
         if not batch_data:
             # 统一后备路径：仍走高质量批量函数，不再保留第二套 API 请求实现
-            self.logger.info("Gemini HQ未提供batch_data，使用统一后备批次路径")
+            self.logger.info(f"{self._log_provider_name()}未提供batch_data，使用统一后备批次路径")
             fallback_regions = getattr(ctx, 'text_regions', []) if ctx else []
             batch_data = [{
                 'image': getattr(ctx, 'input', None) if ctx else None,
@@ -717,7 +732,9 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 'original_texts': queries,
             }]
 
-        self.logger.info(f"使用Gemini高质量翻译统一路径，批次图片数: {len(batch_data)}，最大尝试次数: {self._max_total_attempts}")
+        self.logger.info(
+            f"使用{self._log_provider_name_zh()}统一路径，批次图片数: {len(batch_data)}，最大尝试次数: {self._max_total_attempts}"
+        )
         custom_prompt_json = getattr(ctx, 'custom_prompt_json', None)
         line_break_prompt_json = getattr(ctx, 'line_break_prompt_json', None)
 

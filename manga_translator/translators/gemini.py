@@ -19,7 +19,6 @@ from .common import (
     parse_hq_response,
     validate_gemini_response,
 )
-from .keys import GEMINI_API_KEY
 
 # 浏览器风格的请求头，避免被 CF 拦截
 BROWSER_HEADERS = {
@@ -38,6 +37,11 @@ class GeminiTranslator(CommonTranslator):
     支持批量文本翻译，不包含图片处理
     """
     _LANGUAGE_CODE_MAP = VALID_LANGUAGES
+    API_KEY_ENV = "GEMINI_API_KEY"
+    API_BASE_ENV = "GEMINI_API_BASE"
+    MODEL_ENV = "GEMINI_MODEL"
+    DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+    DEFAULT_MODEL_NAME = "gemini-1.5-flash"
     
     # 类变量: 跨实例共享的RPM限制时间戳
     _GLOBAL_LAST_REQUEST_TS = {}  # {model_name: timestamp}
@@ -53,14 +57,14 @@ class GeminiTranslator(CommonTranslator):
             from dotenv import load_dotenv
             load_dotenv(override=True)
         
-        self.api_key = os.getenv('GEMINI_API_KEY', GEMINI_API_KEY)
-        self.base_url = os.getenv('GEMINI_API_BASE', 'https://generativelanguage.googleapis.com')
-        self.model_name = os.getenv('GEMINI_MODEL', "gemini-1.5-flash")
+        self.api_key = os.getenv(self.API_KEY_ENV, '')
+        self.base_url = os.getenv(self.API_BASE_ENV, self.DEFAULT_BASE_URL) if self.API_BASE_ENV else self.DEFAULT_BASE_URL
+        self.model_name = os.getenv(self.MODEL_ENV, self.DEFAULT_MODEL_NAME)
         self.max_tokens = None  # 不限制，使用模型默认最大值
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
         # 使用全局时间戳,跨实例共享
-        if self.model_name not in GeminiTranslator._GLOBAL_LAST_REQUEST_TS:
-            GeminiTranslator._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
+        if self.model_name not in type(self)._GLOBAL_LAST_REQUEST_TS:
+            type(self)._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
         self._last_request_ts_key = self.model_name
         # 新版 SDK 的安全设置
         self.safety_settings = [
@@ -125,8 +129,8 @@ class GeminiTranslator(CommonTranslator):
         if user_api_model:
             self.model_name = user_api_model
             # 更新全局时间戳的 key
-            if self.model_name not in GeminiTranslator._GLOBAL_LAST_REQUEST_TS:
-                GeminiTranslator._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
+            if self.model_name not in type(self)._GLOBAL_LAST_REQUEST_TS:
+                type(self)._GLOBAL_LAST_REQUEST_TS[self.model_name] = 0
             self._last_request_ts_key = self.model_name
             self.logger.info(f"[UserAPIKey] Using user-provided model: {user_api_model}")
         
@@ -290,7 +294,7 @@ class GeminiTranslator(CommonTranslator):
                     import time
                     now = time.time()
                     delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
-                    elapsed = now - GeminiTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
+                    elapsed = now - type(self)._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
                     if elapsed < delay:
                         sleep_time = delay - elapsed
                         self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
@@ -384,7 +388,7 @@ class GeminiTranslator(CommonTranslator):
                 
                 if self._MAX_REQUESTS_PER_MINUTE > 0:
                     import time
-                    GeminiTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
+                    type(self)._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
 
                 if streamed_text is None:
                     # 验证响应对象是否有效

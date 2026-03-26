@@ -248,6 +248,7 @@ def setup_log_handler():
     translator_names = [
         'OpenAITranslator', 'OpenAIHighQualityTranslator', 
         'GeminiTranslator', 'GeminiHighQualityTranslator',
+        'VertexHighQualityTranslator',
         'SakuraTranslator', 'Qwen2Translator',
         'DeepLTranslator', 'GoogleTranslator', 'BaiduTranslator',
         'PapagoTranslator', 'YandexTranslator', 'ChatGPTTranslator'

@@ -272,6 +272,8 @@ python -m manga_translator web
 
 Good for Docker users, server deployments, or users working through panel tools such as BT Panel or Portainer.
 
+> 💡 **Note**: the `docker run` commands below are good for a quick test. For a long-running Web UI deployment, mount the persistent paths listed below.
+
 ### Quick start
 
 **Windows CMD / PowerShell**
@@ -304,6 +306,54 @@ This project publishes the same image to two registries:
 
 - CPU: `ghcr.io/hgmzhn/manga-translator:latest-cpu`
 - GPU: `ghcr.io/hgmzhn/manga-translator:latest-gpu`
+
+### Recommended Web UI persistence paths
+
+For a real Web UI deployment, persist these paths:
+
+| Path inside container | Priority | Purpose |
+|------|------|------|
+| `/app/manga_translator/server/data` | Required | Unified storage for `admin_config.json`, `user_resources/`, accounts, sessions, groups, permissions, quotas, API key presets, user configs, audit logs, translation-history indexes, and Web history result files |
+| `/app/examples` | Strongly recommended | Stores `config.json`, `custom_api_params.json`, `filter_list.json`, and other auto-created editable config files |
+| `/app/dict` | Strongly recommended | Stores glossaries and AI prompt files such as `ai_ocr_prompt.yaml`, `ai_renderer_prompt.yaml`, and `ai_colorizer_prompt.yaml` |
+| `/app/fonts` | Strongly recommended | Server-level fonts |
+| `/app/models` | Strongly recommended | Downloaded models, so container recreation does not re-download them |
+| `/app/.env` | As needed | Required if you want server API keys saved from the Web UI to survive container recreation |
+| `/app/logs` | Optional | Root-level runtime logs |
+| `/app/result` | Optional | CLI/debug outputs. Web history results mainly live under `server/data/results` |
+
+> 💡 **File bind reminder**:
+> - `admin_config.json` and `user_resources/` now live inside `/app/manga_translator/server/data`
+> - Only `/app/.env` is still a **file bind**. Create an empty host file before starting the container, otherwise Docker may create a directory there instead
+
+### Recommended docker-compose example
+
+This is a better starting point for a long-running Web UI deployment than the minimal `docker run` example:
+
+```yaml
+services:
+  manga-translator:
+    image: hgmzhn/manga-translator:latest-cpu
+    container_name: manga-translator
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MT_WEB_HOST: 0.0.0.0
+      MT_WEB_PORT: 8000
+      MANGA_TRANSLATOR_ADMIN_PASSWORD: change_me_123456
+    volumes:
+      - ./data/models:/app/models
+      - ./data/fonts:/app/fonts
+      - ./data/dict:/app/dict
+      - ./data/config:/app/examples
+      - ./data/server:/app/manga_translator/server/data
+      - ./data/logs:/app/logs
+      - ./data/result:/app/result
+      # If you want server API keys saved in the Web UI to survive container recreation,
+      # create an empty ./data/app.env first, then uncomment this line:
+      # - ./data/app.env:/app/.env
+```
 
 ### Port mapping
 
@@ -345,6 +395,15 @@ This project publishes the same image to two registries:
 | `GEMINI_API_KEY` | Gemini API key |
 | `GEMINI_MODEL` | Gemini model name |
 | `GEMINI_API_BASE` | Gemini API base URL |
+
+**Vertex family**
+
+| Variable | Description |
+|--------|------|
+| `VERTEX_API_KEY` | Vertex API key, used by `vertex` and `vertex_hq` translators |
+| `VERTEX_MODEL` | Vertex model name |
+
+> Note: the Vertex path always uses the fixed official Gemini host internally. There is no public `VERTEX_API_BASE` setting.
 
 **Other commercial providers**
 
@@ -392,7 +451,9 @@ After deployment:
 3. Pull the image
 4. Create a container with `8000:8000`
 5. Add environment variables if needed
-6. Start the container and open the site
+6. Add persistent mounts for `/app/manga_translator/server/data`, `/app/examples`, `/app/dict`, `/app/fonts`, and `/app/models`
+7. If you want server API keys saved from the Web UI to persist too, also bind-mount `/app/.env` from an empty host file you created in advance
+8. Start the container and open the site
 
 > ⚠️ Docker support is still experimental.
 
@@ -516,7 +577,7 @@ If you are using the CPU package or a machine without a compatible GPU:
 If you want online translation:
 
 1. Open `API Management`
-2. Fill the required key such as `OpenAI API Key` or `Gemini API Key`
+2. Fill the required key such as `OpenAI API Key`, `Gemini API Key`, or `Vertex API Key`
 3. Return to `Translation Interface`
 4. Choose `Translator`
 5. Choose `Target Language`
@@ -525,6 +586,7 @@ Recommended first choices:
 
 - `OpenAI High Quality`
 - `Gemini High Quality`
+- `Vertex High Quality` if you want a separate `VERTEX_*` credential set for the official Gemini host
 
 ### 5. Add images
 

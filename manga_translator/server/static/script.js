@@ -283,30 +283,15 @@ async function init() {
     // 只有在允许用户编辑 API keys 时才从 localStorage 恢复
     // 否则清除旧数据，避免覆盖服务器的 API keys
     try {
-        // 先检查是否允许用户编辑（通过检查 API key 策略）
-        fetch('/api-key-policy')
-            .then(res => res.json())
-            .then(policy => {
-                const showEnvToUsers = policy.show_env_to_users || false;
-                
-                if (showEnvToUsers) {
-                    // 允许用户编辑，恢复保存的 API keys
-                    const saved = localStorage.getItem('user_env_vars');
-                    if (saved) {
-                        currentEnvVars = JSON.parse(saved);
-                    }
-                } else {
-                    // 不允许用户编辑，清除旧数据
-                    localStorage.removeItem('user_env_vars');
-                    currentEnvVars = {};
-                }
-            })
-            .catch(e => {
-                console.error('Failed to check API key policy:', e);
-                // 出错时为了安全起见，清除旧数据
-                localStorage.removeItem('user_env_vars');
-                currentEnvVars = {};
-            });
+        const saved = localStorage.getItem('user_env_vars');
+        if (saved) {
+            const schema = getApiKeySchema();
+            const validKeys = new Set(schema.envKeys || []);
+            const parsed = JSON.parse(saved);
+            currentEnvVars = Object.fromEntries(
+                Object.entries(parsed).filter(([key, value]) => validKeys.has(key) && value)
+            );
+        }
     } catch (e) {
         console.error('Failed to load API keys from localStorage:', e);
     }
@@ -834,6 +819,24 @@ async function loadUserSettings() {
         if (apikeysTab) {
             apikeysTab.style.display = userSettings.show_env_editor && hasSessionToken ? 'block' : 'none';
         }
+
+        if (!userSettings.show_env_editor || !hasSessionToken) {
+            currentEnvVars = {};
+        } else if (Object.keys(currentEnvVars).length === 0) {
+            try {
+                const saved = localStorage.getItem('user_env_vars');
+                if (saved) {
+                    const schema = getApiKeySchema();
+                    const validKeys = new Set(schema.envKeys || []);
+                    const parsed = JSON.parse(saved);
+                    currentEnvVars = Object.fromEntries(
+                        Object.entries(parsed).filter(([key, value]) => validKeys.has(key) && value)
+                    );
+                }
+            } catch (e) {
+                console.error('Failed to restore saved API keys:', e);
+            }
+        }
         
         // 根据权限显示/隐藏上传区域
         const fontUploadSection = document.getElementById('font-upload-section');
@@ -998,10 +1001,7 @@ function createPresetSelector() {
         if (presetId) {
             await applyPreset(presetId);
         } else {
-            // 清除预设，恢复默认配置
-            currentPresetId = null;
-            localStorage.removeItem('selected_preset_id');
-            log(t('preset_cleared', '已清除预设，使用默认配置'), 'info');
+            await clearSelectedPreset();
         }
     });
     
@@ -1038,12 +1038,39 @@ async function applyPreset(presetId) {
             
             const preset = availablePresets.find(p => p.id === presetId);
             log(t('preset_applied', '预设已应用') + `: ${preset?.name || presetId}`, 'info');
+            await updateEnvInputs();
         } else {
             throw new Error(data.error || 'Unknown error');
         }
     } catch (e) {
         console.error('Error applying preset:', e);
         log(t('preset_apply_failed', '应用预设失败') + `: ${e.message}`, 'error');
+    }
+}
+
+async function clearSelectedPreset() {
+    try {
+        const sessionToken = localStorage.getItem('session_token');
+        if (!sessionToken) return;
+
+        const res = await fetch('/api/config/user/preset', {
+            method: 'DELETE',
+            headers: {
+                'X-Session-Token': sessionToken,
+            }
+        });
+
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
+
+        currentPresetId = null;
+        localStorage.removeItem('selected_preset_id');
+        log(t('preset_cleared', '已清除手动预设，回退到默认来源'), 'info');
+        await updateEnvInputs();
+    } catch (e) {
+        console.error('Error clearing preset:', e);
+        log(t('preset_clear_failed', '清除预设失败') + `: ${e.message}`, 'error');
     }
 }
 
@@ -1080,6 +1107,16 @@ function addPresetSelectorToUI() {
 }
 
 function generateConfigUI(config) {
+    const formatCapabilityLabel = (value) => {
+        const translated = t(`translator_${value}`, `translator_${value}`);
+        if (translated !== `translator_${value}`) {
+            return translated;
+        }
+        return String(value)
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, l => l.toUpperCase());
+    };
+
     // Helper to create inputs
     const createInput = (key, value, parentKey) => {
         const fullKey = parentKey ? `${parentKey}.${key}` : key;
@@ -1203,6 +1240,8 @@ function generateConfigUI(config) {
                     } else if (key === 'translator') {
                         // 如果是翻译器，使用翻译
                         option.textContent = t(`translator_${opt}`, opt);
+                    } else if (key === 'ocr' || key === 'secondary_ocr' || key === 'renderer' || key === 'colorizer') {
+                        option.textContent = formatCapabilityLabel(opt);
                     } else if (key === 'target_lang' || key === 'keep_lang') {
                         // 如果是目标语言，使用翻译
                         if (key === 'keep_lang' && opt === 'none') {
@@ -1299,17 +1338,9 @@ function populateDropdowns() {
     
     if (translators.length > 0) {
         replaceWithSelectTranslated('translator.translator', translators);
-        
-        // 监听翻译器变化，动态更新 API Keys
-        const translatorSelect = document.querySelector('[data-key="translator.translator"]');
-        if (translatorSelect) {
-            translatorSelect.addEventListener('change', () => {
-                updateEnvInputs(translatorSelect.value);
-            });
-            // 初始化时也更新一次
-            updateEnvInputs(translatorSelect.value);
-        }
     }
+
+    updateEnvInputs();
 
     // 目标语言选项（从服务器获取，带翻译）
     const langs = availableLanguages.map(lang => {
@@ -1577,26 +1608,189 @@ function updatePromptSelects(prompts) {
 // --- API Keys / Env Editor ---
 let currentEnvVars = {};
 
-async function updateEnvInputs(translator) {
-    console.log('updateEnvInputs called with translator:', translator);
-    console.log('userSettings.show_env_editor:', userSettings.show_env_editor);
-    
+function collectCurrentEnvInputs() {
     const container = document.getElementById('env-inputs-container');
     if (!container) {
-        console.warn('env-inputs-container not found');
-        return;
+        return { ...currentEnvVars };
     }
-    
-    // 清空现有输入框
+
+    const nextEnvVars = {};
+    const inputs = container.querySelectorAll('input[data-env-key]');
+    inputs.forEach(input => {
+        const key = input.dataset.envKey;
+        const value = input.value.trim();
+        if (key && value) {
+            nextEnvVars[key] = value;
+        }
+    });
+    return nextEnvVars;
+}
+
+function getApiKeySchema() {
+    return window.ApiKeySchema || { categories: [], groups: [], envKeys: [] };
+}
+
+function getApiGroupLabel(group) {
+    return group.i18nKey ? t(group.i18nKey, group.name) : group.name;
+}
+
+function createEnvSummary(policy, envState) {
+    const summary = document.createElement('div');
+    summary.className = 'env-hint env-merge-summary';
+
+    const lines = [];
+    const presetName = envState.selected_preset_name || envState.selected_preset_id;
+    if (presetName) {
+        const presetSource = envState.selected_preset_source === 'group_default'
+            ? '用户组默认预设'
+            : '当前用户预设';
+        lines.push(`当前预设：${presetName}（${presetSource}）`);
+    } else {
+        lines.push('当前未选中 API 预设。');
+    }
+
+    lines.push('生效顺序：用户填写 > 当前预设 > 服务器默认。继承值不会在页面明文显示。');
+
+    if (policy.allow_server_keys === false) {
+        lines.push('当前权限已禁止回落服务器默认 API Keys。');
+    }
+    if (policy.require_user_keys === true) {
+        lines.push('当前权限要求用户必须提供 API Keys 或选择预设。');
+    }
+
+    lines.forEach(text => {
+        const line = document.createElement('div');
+        line.textContent = text;
+        summary.appendChild(line);
+    });
+
+    return summary;
+}
+
+function getEnvFieldSourceText(key, userOverrides, envState) {
+    if (userOverrides[key]) {
+        return '当前使用你填写的值，会覆盖预设或服务器默认配置。';
+    }
+
+    if (envState.sources?.[key] === 'preset') {
+        const presetName = envState.selected_preset_name || envState.selected_preset_id || '当前预设';
+        return `当前继承自预设：${presetName}。值不会明文显示，留空可继续继承，填写可覆盖。`;
+    }
+
+    if (envState.sources?.[key] === 'server') {
+        return '当前继承自服务器默认配置。值不会明文显示，留空可继续继承，填写可覆盖。';
+    }
+
+    return '';
+}
+
+function renderUserApiKeyEditor(container, mergedValues, policy, envState = {}, userOverrides = {}) {
+    const schema = getApiKeySchema();
     container.innerHTML = '';
-    
-    if (!translator) {
-        console.log('No translator selected');
+
+    if (!schema.groups.length) {
+        container.innerHTML = `<p class="env-hint">${t('translator_no_api_keys', '当前没有可管理的 API 配置')}</p>`;
         return;
     }
-    
+
+    container.appendChild(createEnvSummary(policy, envState));
+
+    schema.categories.forEach(category => {
+        const groups = schema.groups.filter(group => group.category === category.id);
+        if (!groups.length) {
+            return;
+        }
+
+        const categoryWrapper = document.createElement('div');
+
+        const categoryTitle = document.createElement('div');
+        categoryTitle.className = 'env-category-title';
+        categoryTitle.textContent = t(category.i18nKey, category.fallback);
+        categoryWrapper.appendChild(categoryTitle);
+
+        groups.forEach(group => {
+            const groupCard = document.createElement('div');
+            groupCard.className = 'env-group-card';
+
+            const title = document.createElement('h4');
+            title.className = 'env-group-title';
+            title.textContent = getApiGroupLabel(group);
+            groupCard.appendChild(title);
+
+            if (group.note) {
+                const note = document.createElement('p');
+                note.className = 'env-group-note';
+                note.textContent = group.note;
+                groupCard.appendChild(note);
+            }
+
+            const grid = document.createElement('div');
+            grid.className = 'env-group-grid';
+
+            group.keys.forEach(item => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'form-group';
+
+                const label = document.createElement('label');
+                label.textContent = t(item.i18n, item.key);
+                wrapper.appendChild(label);
+
+                const input = document.createElement('input');
+                input.type = item.type || 'text';
+                input.className = 'full-width-select';
+                input.value = mergedValues[item.key] || '';
+                input.placeholder = item.placeholder || '';
+                input.dataset.envKey = item.key;
+                wrapper.appendChild(input);
+
+                const sourceText = getEnvFieldSourceText(item.key, userOverrides, envState);
+                if (sourceText) {
+                    const sourceNote = document.createElement('div');
+                    sourceNote.className = 'env-field-source';
+                    sourceNote.textContent = sourceText;
+                    wrapper.appendChild(sourceNote);
+                }
+
+                grid.appendChild(wrapper);
+            });
+
+            groupCard.appendChild(grid);
+            categoryWrapper.appendChild(groupCard);
+        });
+
+        container.appendChild(categoryWrapper);
+    });
+
+    const savePanel = document.createElement('div');
+    savePanel.className = 'env-save-panel';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'primary-btn';
+    saveBtn.textContent = t('save_api_keys', '保存 API 密钥');
+    saveBtn.onclick = async () => {
+        await saveAllEnvVars();
+    };
+    savePanel.appendChild(saveBtn);
+
+    const hint = document.createElement('div');
+    hint.className = 'env-save-hint';
+    hint.textContent = policy.save_user_keys_to_server
+        ? t('api_keys_will_be_saved', 'API 密钥将保存到服务器')
+        : t('api_keys_session_only', 'API 密钥仅在本次会话中使用，不会保存到服务器');
+    savePanel.appendChild(hint);
+
+    container.appendChild(savePanel);
+}
+
+async function updateEnvInputs() {
+    const container = document.getElementById('env-inputs-container');
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = '';
+
     if (!userSettings.show_env_editor) {
-        console.log('API Keys editor is hidden by admin settings');
         return;
     }
 
@@ -1607,100 +1801,55 @@ async function updateEnvInputs(translator) {
     }
     
     try {
-        // 获取翻译器配置
-        const res = await fetch(`/translator-config/${translator}`);
-        const config = await res.json();
-        
-        const allVars = [...(config.required_env_vars || []), ...(config.optional_env_vars || [])];
-        
-        if (allVars.length === 0) {
-            container.innerHTML = `<p class="env-hint">${t('translator_no_api_keys', '此翻译器不需要 API 密钥')}</p>`;
-            return;
-        }
-        
-        // 从 localStorage 恢复用户保存的 API keys
+        const schema = getApiKeySchema();
+        const validKeys = new Set(schema.envKeys || []);
         let savedEnvVars = {};
         try {
             const saved = localStorage.getItem('user_env_vars');
             if (saved) {
-                savedEnvVars = JSON.parse(saved);
-                // 同时更新 currentEnvVars
-                currentEnvVars = {...savedEnvVars};
+                savedEnvVars = Object.fromEntries(
+                    Object.entries(JSON.parse(saved)).filter(([key, value]) => validKeys.has(key) && value)
+                );
             }
         } catch (e) {
             console.error('Failed to load from localStorage:', e);
         }
+        currentEnvVars = { ...savedEnvVars };
         
-        // 根据设置决定是否加载服务器的环境变量值
-        let serverEnvVars = {};
-        if (userSettings.allow_server_keys) {
-            const envRes = await fetch('/env', {
+        const [policyRes, envStateRes] = await Promise.all([
+            fetch('/api-key-policy', {
                 headers: { 'X-Session-Token': sessionToken }
-            });
-            serverEnvVars = await envRes.json();
-        }
-        
-        // 为每个环境变量创建输入框
-        allVars.forEach(varName => {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'form-group';
-            
-            const label = document.createElement('label');
-            label.textContent = t(`label_${varName}`, varName);
-            wrapper.appendChild(label);
-            
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'full-width-select';
-            // 优先级：用户保存的值 > 服务器的值 > 空
-            input.value = savedEnvVars[varName] || serverEnvVars[varName] || '';
-            input.placeholder = userSettings.allow_server_keys ? 
-                t(`placeholder_${varName}`, '') : 
-                t('enter_your_api_key', '请输入您的 API 密钥');
-            input.dataset.envKey = varName;
-            
-            // 标记为已修改
-            input.addEventListener('input', () => {
-                input.dataset.modified = 'true';
-            });
-            
-            wrapper.appendChild(input);
-            container.appendChild(wrapper);
-        });
-        
-        // 添加保存按钮
-        const buttonWrapper = document.createElement('div');
-        buttonWrapper.style.marginTop = '20px';
-        buttonWrapper.style.textAlign = 'center';
-        
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'primary-btn';
-        saveBtn.textContent = t('save_api_keys', '保存 API 密钥');
-        saveBtn.onclick = async () => {
-            await saveAllEnvVars();
+            }),
+            fetch('/env/effective', {
+                headers: { 'X-Session-Token': sessionToken }
+            })
+        ]);
+        const policy = await policyRes.json();
+        const rawEnvState = await envStateRes.json();
+        const envState = {
+            ...rawEnvState,
+            sources: rawEnvState.sources || {},
+            merged_env_vars: {},
         };
-        buttonWrapper.appendChild(saveBtn);
-        
-        container.appendChild(buttonWrapper);
-        
-        // 添加提示信息
-        const hintWrapper = document.createElement('div');
-        hintWrapper.style.marginTop = '10px';
-        hintWrapper.style.fontSize = '12px';
-        hintWrapper.style.color = '#666';
-        hintWrapper.style.textAlign = 'center';
-        
-        const policy = await fetch('/api-key-policy').then(r => r.json());
-        if (policy.save_user_keys_to_server) {
-            hintWrapper.textContent = t('api_keys_will_be_saved', 'API 密钥将保存到服务器');
-        } else {
-            hintWrapper.textContent = t('api_keys_session_only', 'API 密钥仅在本次会话中使用，不会保存到服务器');
+
+        const presetSelect = document.getElementById('preset-select');
+        if (presetSelect) {
+            const effectivePresetId = envState.selected_preset_id || '';
+            const canUsePreset = effectivePresetId && availablePresets.some(p => p.id === effectivePresetId);
+            if (canUsePreset) {
+                presetSelect.value = effectivePresetId;
+                currentPresetId = effectivePresetId;
+            } else if (!localStorage.getItem('selected_preset_id')) {
+                presetSelect.value = '';
+                currentPresetId = null;
+            }
         }
-        container.appendChild(hintWrapper);
-        
+
+        const mergedValues = { ...savedEnvVars };
+        renderUserApiKeyEditor(container, mergedValues, policy, envState, savedEnvVars);
     } catch (e) {
-        console.error('Error loading translator config:', e);
-        container.innerHTML = `<p class="env-hint" style="color: #f44336;">${t('error_loading_translator_config', '加载翻译器配置失败')}</p>`;
+        console.error('Error loading API key editor:', e);
+        container.innerHTML = `<p class="env-hint" style="color: #f44336;">${t('error_loading_translator_config', '加载 API 配置失败')}</p>`;
     }
 }
 
@@ -1715,25 +1864,30 @@ async function saveAllEnvVars() {
     }
     
     const inputs = container.querySelectorAll('input[data-env-key]');
-    const envVars = {};
+    const previousEnvVars = { ...currentEnvVars };
+    const payloadEnvVars = {};
+    const filledEnvVars = {};
     
     inputs.forEach(input => {
         const key = input.dataset.envKey;
         const value = input.value.trim();
         if (value) {
-            envVars[key] = value;
-            currentEnvVars[key] = value;
+            filledEnvVars[key] = value;
+            payloadEnvVars[key] = value;
+        } else if (previousEnvVars[key]) {
+            payloadEnvVars[key] = '';
         }
     });
-    
-    if (Object.keys(envVars).length === 0) {
-        log(t('no_api_keys_to_save', '没有要保存的 API 密钥'), 'warning');
-        return;
-    }
+
+    currentEnvVars = { ...filledEnvVars };
     
     // 保存到 localStorage，页面刷新后不会丢失
     try {
-        localStorage.setItem('user_env_vars', JSON.stringify(envVars));
+        if (Object.keys(filledEnvVars).length > 0) {
+            localStorage.setItem('user_env_vars', JSON.stringify(filledEnvVars));
+        } else {
+            localStorage.removeItem('user_env_vars');
+        }
     } catch (e) {
         console.error('Failed to save to localStorage:', e);
     }
@@ -1745,7 +1899,7 @@ async function saveAllEnvVars() {
                 'Content-Type': 'application/json',
                 'X-Session-Token': sessionToken
             },
-            body: JSON.stringify(envVars)
+            body: JSON.stringify(payloadEnvVars)
         });
         
         if (!result.ok) {
@@ -1759,11 +1913,7 @@ async function saveAllEnvVars() {
         } else {
             log(t('api_keys_saved_session', 'API 密钥已保存（仅本次会话）'), 'info');
         }
-        
-        // 清除修改标记
-        inputs.forEach(input => {
-            delete input.dataset.modified;
-        });
+        await updateEnvInputs();
     } catch (e) {
         console.error('Error saving env vars:', e);
         log(t('api_keys_save_failed', 'API 密钥保存失败') + ': ' + e.message, 'error');
@@ -2357,8 +2507,10 @@ async function processFile(file, mode, config) {
     formData.append('config', JSON.stringify(config));
     
     // 如果用户输入了 API Keys，发送给服务器
-    if (currentEnvVars && Object.keys(currentEnvVars).length > 0) {
-        formData.append('user_env_vars', JSON.stringify(currentEnvVars));
+    const requestEnvVars = collectCurrentEnvInputs();
+    currentEnvVars = { ...requestEnvVars };
+    if (Object.keys(requestEnvVars).length > 0) {
+        formData.append('user_env_vars', JSON.stringify(requestEnvVars));
     }
 
     // Determine endpoint based on mode
@@ -2518,21 +2670,28 @@ async function processStream(endpoint, formData, filename) {
         if (finishedTaskId) {
             // 获取该任务的所有日志（不使用时间戳过滤，获取完整日志）
             try {
-                const url = `/api/logs?limit=500&task_id=${finishedTaskId}`;
-                const res = await fetch(url, {
-                    headers: { 'X-Session-Token': sessionToken }
-                });
-                const logs = await res.json();
-                if (logs.length > 0) {
-                    // 获取所有未显示的日志（使用时间戳过滤）
-                    const newLogs = lastLogTimestamp
-                        ? logs.filter(l => new Date(l.timestamp) > new Date(lastLogTimestamp))
-                        : logs;
-                    if (newLogs.length > 0) {
-                        log(`--- 详细日志 (${newLogs.length} 条) ---`, 'info', true);
-                        newLogs.forEach(l => {
-                            log(`[${l.level}] ${l.message}`, l.level.toLowerCase(), false);
-                        });
+                const sessionToken = localStorage.getItem('session_token');
+                if (sessionToken) {
+                    const url = `/api/logs?limit=500&task_id=${finishedTaskId}`;
+                    const res = await fetch(url, {
+                        headers: { 'X-Session-Token': sessionToken }
+                    });
+                    if (res.status === 401) {
+                        handleLogPollingAuthFailure();
+                    } else if (res.ok) {
+                        const logs = await res.json();
+                        if (logs.length > 0) {
+                            // 获取所有未显示的日志（使用时间戳过滤）
+                            const newLogs = lastLogTimestamp
+                                ? logs.filter(l => new Date(l.timestamp) > new Date(lastLogTimestamp))
+                                : logs;
+                            if (newLogs.length > 0) {
+                                log(`--- 详细日志 (${newLogs.length} 条) ---`, 'info', true);
+                                newLogs.forEach(l => {
+                                    log(`[${l.level}] ${l.message}`, l.level.toLowerCase(), false);
+                                });
+                            }
+                        }
                     }
                 }
             } catch (e) {
@@ -2541,6 +2700,7 @@ async function processStream(endpoint, formData, filename) {
         }
         currentTaskId = null;
         lastLogTimestamp = null;
+        logPollingAuthErrorShown = false;
     }
 }
 
@@ -2578,13 +2738,41 @@ function switchTab(tabId) {
 
 let lastLogTimestamp = null;
 let currentTaskId = null; // 当前正在处理的任务ID
+let logPollingTimer = null;
+let logPollingAuthErrorShown = false;
+
+function stopLogPolling() {
+    if (logPollingTimer) {
+        clearInterval(logPollingTimer);
+        logPollingTimer = null;
+    }
+}
+
+function handleLogPollingAuthFailure() {
+    stopLogPolling();
+    if (logPollingAuthErrorShown) {
+        return;
+    }
+    logPollingAuthErrorShown = true;
+    log('登录状态已过期，已停止实时日志轮询。当前任务可能仍在继续，请重新登录后再查看日志。', 'warning');
+}
 
 function startLogPolling() {
-    setInterval(async () => {
+    if (logPollingTimer) {
+        return;
+    }
+
+    logPollingTimer = setInterval(async () => {
         try {
             // 只有在有当前任务时才轮询日志
             if (!currentTaskId) {
                 return; // 没有任务，不轮询
+            }
+
+            const sessionToken = localStorage.getItem('session_token');
+            if (!sessionToken) {
+                handleLogPollingAuthFailure();
+                return;
             }
             
             // 获取当前任务的日志（增加限制到200条以获取更多详细日志）
@@ -2594,6 +2782,13 @@ function startLogPolling() {
                     'X-Session-Token': sessionToken
                 }
             });
+            if (res.status === 401) {
+                handleLogPollingAuthFailure();
+                return;
+            }
+            if (!res.ok) {
+                return;
+            }
             const logs = await res.json();
 
             if (logs.length > 0) {

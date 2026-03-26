@@ -11,10 +11,11 @@ from typing import Optional
 
 from manga_translator import Config
 from manga_translator.custom_api_params import migrate_legacy_custom_api_params_config
+from manga_translator.server_paths import ADMIN_CONFIG_FILE, ensure_server_data_layout
 from manga_translator.utils import BASE_PATH
 
 # 配置文件路径
-ADMIN_CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'admin_config.json')
+ADMIN_CONFIG_PATH = str(ADMIN_CONFIG_FILE)
 # 默认配置文件：优先使用 examples/config.json（相对于项目根目录）
 SERVER_CONFIG_PATH = os.path.join(BASE_PATH, 'examples', 'config.json')
 
@@ -26,6 +27,7 @@ PROMPTS_DIR = os.path.abspath(PROMPTS_DIR)
 # 确保目录存在
 os.makedirs(FONTS_DIR, exist_ok=True)
 os.makedirs(PROMPTS_DIR, exist_ok=True)
+ensure_server_data_layout()
 
 # i18n 相关路径
 desktop_locales_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'desktop_qt_ui', 'locales')
@@ -178,6 +180,7 @@ def load_admin_settings() -> dict:
 def save_admin_settings(settings: dict) -> bool:
     """保存管理员配置到文件"""
     try:
+        os.makedirs(os.path.dirname(ADMIN_CONFIG_PATH), exist_ok=True)
         with open(ADMIN_CONFIG_PATH, 'w', encoding='utf-8') as f:
             json.dump(settings, f, indent=2, ensure_ascii=False)
         print(f"[INFO] Saved admin settings to: {ADMIN_CONFIG_PATH}")

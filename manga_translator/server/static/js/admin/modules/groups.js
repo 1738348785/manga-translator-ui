@@ -90,6 +90,12 @@ class GroupsModule {
                 ...this.currentEditGroup.parameter_config || {},
                 allowed_translators: this.currentEditGroup.allowed_translators || ['*'],
                 denied_translators: this.currentEditGroup.denied_translators || [],
+                allowed_ocr: this.currentEditGroup.allowed_ocr || ['*'],
+                denied_ocr: this.currentEditGroup.denied_ocr || [],
+                allowed_colorizers: this.currentEditGroup.allowed_colorizers || ['*'],
+                denied_colorizers: this.currentEditGroup.denied_colorizers || [],
+                allowed_renderers: this.currentEditGroup.allowed_renderers || ['*'],
+                denied_renderers: this.currentEditGroup.denied_renderers || [],
                 allowed_workflows: this.currentEditGroup.allowed_workflows || ['*'],
                 denied_workflows: this.currentEditGroup.denied_workflows || [],
                 visible_presets: this.currentEditGroup.visible_presets || []
@@ -113,6 +119,12 @@ class GroupsModule {
         // 提取翻译器配置
         const allowedTranslators = config.allowed_translators || ['*'];
         const deniedTranslators = config.denied_translators || [];
+        const allowedOcr = config.allowed_ocr || ['*'];
+        const deniedOcr = config.denied_ocr || [];
+        const allowedColorizers = config.allowed_colorizers || ['*'];
+        const deniedColorizers = config.denied_colorizers || [];
+        const allowedRenderers = config.allowed_renderers || ['*'];
+        const deniedRenderers = config.denied_renderers || [];
         // 提取工作流配置
         const allowedWorkflows = config.allowed_workflows || ['*'];
         const deniedWorkflows = config.denied_workflows || [];
@@ -124,6 +136,12 @@ class GroupsModule {
         delete paramConfig._meta;
         delete paramConfig.allowed_translators;
         delete paramConfig.denied_translators;
+        delete paramConfig.allowed_ocr;
+        delete paramConfig.denied_ocr;
+        delete paramConfig.allowed_colorizers;
+        delete paramConfig.denied_colorizers;
+        delete paramConfig.allowed_renderers;
+        delete paramConfig.denied_renderers;
         delete paramConfig.allowed_workflows;
         delete paramConfig.denied_workflows;
         delete paramConfig.visible_presets;
@@ -140,6 +158,12 @@ class GroupsModule {
                     default_preset_id: defaultPresetId,
                     allowed_translators: allowedTranslators,
                     denied_translators: deniedTranslators,
+                    allowed_ocr: allowedOcr,
+                    denied_ocr: deniedOcr,
+                    allowed_colorizers: allowedColorizers,
+                    denied_colorizers: deniedColorizers,
+                    allowed_renderers: allowedRenderers,
+                    denied_renderers: deniedRenderers,
                     allowed_workflows: allowedWorkflows,
                     denied_workflows: deniedWorkflows,
                     visible_presets: visiblePresets

@@ -377,113 +377,7 @@
                         </div>
                         <div class="panel-body">
                             <p style="color:#6b7280;margin-bottom:16px;">服务器默认的API密钥配置（.env文件），当用户没有选择预设时使用。</p>
-                            
-                            <!-- OpenAI -->
-                            <div class="env-group" style="margin-bottom:24px;padding:16px;background:#f9fafb;border-radius:8px;">
-                                <h4 style="margin-bottom:12px;font-size:14px;font-weight:600;" data-i18n="translator_openai">OpenAI / ChatGPT</h4>
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_OPENAI_API_KEY">OpenAI API 密钥</label>
-                                        <input type="password" class="form-input" id="env-OPENAI_API_KEY" placeholder="sk-...">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_OPENAI_API_BASE">OpenAI API 地址</label>
-                                        <input type="text" class="form-input" id="env-OPENAI_API_BASE" placeholder="https://api.openai.com/v1">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_OPENAI_MODEL">OpenAI 模型</label>
-                                        <input type="text" class="form-input" id="env-OPENAI_MODEL" placeholder="gpt-4o">
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Gemini -->
-                            <div class="env-group" style="margin-bottom:24px;padding:16px;background:#f9fafb;border-radius:8px;">
-                                <h4 style="margin-bottom:12px;font-size:14px;font-weight:600;" data-i18n="translator_gemini">Google Gemini</h4>
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_GEMINI_API_KEY">Gemini API 密钥</label>
-                                        <input type="password" class="form-input" id="env-GEMINI_API_KEY" placeholder="AIza...">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_GEMINI_MODEL">Gemini 模型</label>
-                                        <input type="text" class="form-input" id="env-GEMINI_MODEL" placeholder="gemini-1.5-flash">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_GEMINI_API_BASE">Gemini API 地址</label>
-                                        <input type="text" class="form-input" id="env-GEMINI_API_BASE" placeholder="">
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- DeepSeek -->
-                            <div class="env-group" style="margin-bottom:24px;padding:16px;background:#f9fafb;border-radius:8px;">
-                                <h4 style="margin-bottom:12px;font-size:14px;font-weight:600;">DeepSeek</h4>
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_DEEPSEEK_API_KEY">DeepSeek API 密钥</label>
-                                        <input type="password" class="form-input" id="env-DEEPSEEK_API_KEY" placeholder="sk-...">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_DEEPSEEK_API_BASE">DeepSeek API 地址</label>
-                                        <input type="text" class="form-input" id="env-DEEPSEEK_API_BASE" placeholder="https://api.deepseek.com">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_DEEPSEEK_MODEL">DeepSeek 模型</label>
-                                        <input type="text" class="form-input" id="env-DEEPSEEK_MODEL" placeholder="deepseek-chat">
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- DeepL -->
-                            <div class="env-group" style="margin-bottom:24px;padding:16px;background:#f9fafb;border-radius:8px;">
-                                <h4 style="margin-bottom:12px;font-size:14px;font-weight:600;" data-i18n="translator_deepl">DeepL</h4>
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_DEEPL_AUTH_KEY">DeepL 授权密钥</label>
-                                        <input type="password" class="form-input" id="env-DEEPL_AUTH_KEY" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx">
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Groq -->
-                            <div class="env-group" style="margin-bottom:24px;padding:16px;background:#f9fafb;border-radius:8px;">
-                                <h4 style="margin-bottom:12px;font-size:14px;font-weight:600;">Groq</h4>
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_GROQ_API_KEY">Groq API 密钥</label>
-                                        <input type="password" class="form-input" id="env-GROQ_API_KEY" placeholder="gsk_...">
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- 其他翻译器 -->
-                            <div class="env-group" style="margin-bottom:24px;padding:16px;background:#f9fafb;border-radius:8px;">
-                                <h4 style="margin-bottom:12px;font-size:14px;font-weight:600;">其他翻译器</h4>
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_BAIDU_APP_ID">百度翻译 AppID</label>
-                                        <input type="text" class="form-input" id="env-BAIDU_APP_ID" placeholder="AppID">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_BAIDU_SECRET_KEY">百度翻译密钥</label>
-                                        <input type="password" class="form-input" id="env-BAIDU_SECRET_KEY" placeholder="Secret Key">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_YOUDAO_APP_KEY">有道翻译应用ID</label>
-                                        <input type="text" class="form-input" id="env-YOUDAO_APP_KEY" placeholder="App Key">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_YOUDAO_SECRET_KEY">有道翻译密钥</label>
-                                        <input type="password" class="form-input" id="env-YOUDAO_SECRET_KEY" placeholder="Secret Key">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="label_CAIYUN_TOKEN">彩云小译Token</label>
-                                        <input type="password" class="form-input" id="env-CAIYUN_TOKEN" placeholder="Token">
-                                    </div>
-                                </div>
-                            </div>
-                            
+                            <div id="server-env-groups"></div>
                             <button class="btn btn-primary" onclick="envVarsModule.saveEnvVars()">💾 保存API密钥</button>
                         </div>
                     </div>
@@ -672,16 +566,17 @@
     <!-- 脚本 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="/static/js/i18n.js?v=4"></script>
-    <script src="/static/js/admin/components/permission-editor.js?v=6"></script>
+    <script src="/static/js/shared/api-key-schema.js?v=1"></script>
+    <script src="/static/js/admin/components/permission-editor.js?v=7"></script>
     <script src="/static/js/admin/app.js?v=3"></script>
-    <script src="/static/js/admin/modules/users.js?v=4"></script>
-    <script src="/static/js/admin/modules/groups.js?v=4"></script>
+    <script src="/static/js/admin/modules/users.js?v=5"></script>
+    <script src="/static/js/admin/modules/groups.js?v=5"></script>
     <script src="/static/js/admin/modules/quota.js?v=2"></script>
     <script src="/static/js/admin/modules/tasks.js?v=2"></script>
     <script src="/static/js/admin/modules/history.js?v=3"></script>
     <script src="/static/js/admin/modules/logs.js?v=3"></script>
     <script src="/static/js/admin/modules/config.js?v=4"></script>
-    <script src="/static/js/admin/modules/envvars.js?v=5"></script>
+    <script src="/static/js/admin/modules/envvars.js?v=6"></script>
     <script src="/static/js/admin/modules/announcement.js?v=2"></script>
     <script src="/static/js/admin/modules/cleanup.js?v=2"></script>
     <script src="/static/js/admin/modules/sessions.js?v=3"></script>

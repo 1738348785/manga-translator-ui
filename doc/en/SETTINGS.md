@@ -32,8 +32,8 @@ The original Chinese document grouped the interface into three tabs. In the curr
 
 - **`Translator` (`translator`)**: choose the translation engine.
   - Current UI location: `Translation Interface` -> `Translator`
-  - Online translators include `Google Gemini`, `OpenAI`, `DeepL`, `Baidu`, and others.
-  - High-quality translators include `OpenAI High Quality` and `Gemini High Quality` and are generally recommended.
+  - Online translators include `OpenAI`, `Google Gemini`, `Vertex`, `DeepL`, `Baidu`, and others.
+  - High-quality translators include `OpenAI High Quality`, `Gemini High Quality`, and `Vertex High Quality` and are generally recommended.
 
 - **`Target Language` (`target_lang`)**: target output language for translation.
   - Current UI location: `Settings` -> `Translation` -> `Target Language`
@@ -53,7 +53,7 @@ The original Chinese document grouped the interface into three tabs. In the curr
 
 - **`Enable Streaming` (`enable_streaming`)**: control whether supported translators prefer streaming responses.
   - Current UI location: `Settings` -> `Translation` -> `Enable Streaming`
-  - Applies to: `OpenAI`, `Google Gemini`, `OpenAI High Quality`, and `Gemini High Quality`
+  - Applies to: `OpenAI`, `Google Gemini`, `Vertex`, `OpenAI High Quality`, `Gemini High Quality`, and `Vertex High Quality`
   - Default: enabled (`true`)
   - When enabled: the app prefers the unified streaming transport layer and receives incremental responses in real time. If streaming fails, it falls back to a normal request automatically.
   - When disabled: the app always uses non-streaming requests and no longer attempts streaming.
@@ -67,7 +67,7 @@ The original Chinese document grouped the interface into three tabs. In the curr
 
 - **`Custom Prompt` (`high_quality_prompt_path`)**: custom prompt file path.
   - Internal config key: `translator.high_quality_prompt_path`
-  - Applies to: `OpenAI`, `Google Gemini`, `OpenAI High Quality`, and `Gemini High Quality`
+  - Applies to: `OpenAI`, `Google Gemini`, `Vertex`, `OpenAI High Quality`, `Gemini High Quality`, and `Vertex High Quality`
   - Default: `dict/prompt_example.yaml`
   - You can create new `.yaml` or `.json` files under `dict/`
   - Standard YAML or JSON format is enough; YAML is preferred when both exist
@@ -77,7 +77,7 @@ The original Chinese document grouped the interface into three tabs. In the curr
 
 - **`Auto Extract Glossary` (`extract_glossary`)**: automatically extract new terms from translation results.
   - Current UI location: `Settings` -> `Translation` -> `Auto Extract Glossary`
-  - Applies to: `OpenAI`, `Google Gemini`, `OpenAI High Quality`, and `Gemini High Quality`
+  - Applies to: `OpenAI`, `Google Gemini`, `Vertex`, `OpenAI High Quality`, `Gemini High Quality`, and `Vertex High Quality`
   - When enabled, AI automatically identifies and extracts names, places, organizations, and other proper nouns.
   - Extracted terms are added to the glossary section of the current custom prompt file.
   - Later translations reuse those terms to keep wording consistent.
@@ -222,7 +222,7 @@ The original Chinese document grouped the interface into three tabs. In the curr
 - **`Batch Size` (`batch_size`)**: batch processing size.
   - Current UI location: `Settings` -> `General` -> `Batch Size`
   - Default: `1`
-  - For high-quality translators (`OpenAI High Quality` / `Gemini High Quality`), this controls how many images are sent at once
+  - For high-quality translators (`OpenAI High Quality` / `Gemini High Quality` / `Vertex High Quality`), this controls how many images are sent at once
   - Larger values make translation faster but consume more tokens
   - Recommended range: `1-10`
 
@@ -500,7 +500,7 @@ The original Chinese document grouped the interface into three tabs. In the curr
 
 - **`AI Line Break Auto Enlarge` (`optimize_line_breaks`)**: enable AI line-break optimization that automatically adjusts font size to reduce broken lines.
   - Current UI location: `Settings` -> `Typesetting` -> `AI Line Break Auto Enlarge`
-  - Requires `OpenAI` or `Google Gemini` family translators
+  - Requires `OpenAI`, `Google Gemini`, or `Vertex` family translators
   - AI automatically optimizes line breaks to improve readability
 
 - **`AI Line Break Check` (`check_br_and_retry`)**: check the AI line-break result and retry if needed.
@@ -774,12 +774,12 @@ Example:
 - **User custom prompts** selected in the UI:
   - `dict/prompt_example.yaml` - prompt example
   - you can add your own `.yaml` or `.json` prompt files here
-- Applies to: `OpenAI`, `Google Gemini`, `OpenAI High Quality`, and `Gemini High Quality`
+- Applies to: `OpenAI`, `Google Gemini`, `Vertex`, `OpenAI High Quality`, `Gemini High Quality`, and `Vertex High Quality`
 - Prompt files can customize translation style, glossary, and context instructions
 
 **How to add a custom prompt**
 
-> Note: this prompt system is used by **OpenAI**, **Google Gemini**, **OpenAI High Quality**, and **Gemini High Quality**.
+> Note: this prompt system is used by **OpenAI**, **Google Gemini**, **Vertex**, **OpenAI High Quality**, **Gemini High Quality**, and **Vertex High Quality**.
 
 > Important: if you installed with the script version, do **not** edit `prompt_example.yaml` directly, because updates may overwrite it. Create a new file instead.
 

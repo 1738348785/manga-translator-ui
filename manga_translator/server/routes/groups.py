@@ -63,6 +63,12 @@ class UpdateGroupConfigRequest(BaseModel):
     parameter_config: Dict[str, Any] = Field(default={}, description="参数配置")
     allowed_translators: Optional[List[str]] = Field(default=None, description="翻译器白名单")
     denied_translators: Optional[List[str]] = Field(default=None, description="翻译器黑名单")
+    allowed_ocr: Optional[List[str]] = Field(default=None, description="OCR 白名单")
+    denied_ocr: Optional[List[str]] = Field(default=None, description="OCR 黑名单")
+    allowed_colorizers: Optional[List[str]] = Field(default=None, description="上色器白名单")
+    denied_colorizers: Optional[List[str]] = Field(default=None, description="上色器黑名单")
+    allowed_renderers: Optional[List[str]] = Field(default=None, description="渲染器白名单")
+    denied_renderers: Optional[List[str]] = Field(default=None, description="渲染器黑名单")
     allowed_workflows: Optional[List[str]] = Field(default=None, description="工作流白名单")
     denied_workflows: Optional[List[str]] = Field(default=None, description="工作流黑名单")
     default_preset_id: Optional[str] = Field(default=None, description="默认API密钥预设ID")
@@ -360,6 +366,18 @@ async def update_group_config(
             config['allowed_translators'] = request.allowed_translators
         if request.denied_translators is not None:
             config['denied_translators'] = request.denied_translators
+        if request.allowed_ocr is not None:
+            config['allowed_ocr'] = request.allowed_ocr
+        if request.denied_ocr is not None:
+            config['denied_ocr'] = request.denied_ocr
+        if request.allowed_colorizers is not None:
+            config['allowed_colorizers'] = request.allowed_colorizers
+        if request.denied_colorizers is not None:
+            config['denied_colorizers'] = request.denied_colorizers
+        if request.allowed_renderers is not None:
+            config['allowed_renderers'] = request.allowed_renderers
+        if request.denied_renderers is not None:
+            config['denied_renderers'] = request.denied_renderers
         # 添加工作流白名单/黑名单
         if request.allowed_workflows is not None:
             config['allowed_workflows'] = request.allowed_workflows

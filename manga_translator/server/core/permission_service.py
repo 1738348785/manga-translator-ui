@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 class PermissionService:
     """权限管理服务"""
+
+    FEATURE_PERMISSION_FIELDS = {
+        'translator': ('allowed_translators', 'denied_translators'),
+        'ocr': ('allowed_ocr', 'denied_ocr'),
+        'colorizer': ('allowed_colorizers', 'denied_colorizers'),
+        'renderer': ('allowed_renderers', 'denied_renderers'),
+        'workflow': ('allowed_workflows', 'denied_workflows'),
+    }
     
     def __init__(self, account_service: AccountService):
         """
@@ -33,66 +41,98 @@ class PermissionService:
         # 跟踪用户的每日使用配额: (username, date) -> count
         self.daily_usage: Dict[tuple, int] = defaultdict(int)
     
-    def check_translator_permission(self, username: str, translator: str) -> bool:
-        """
-        检查翻译器权限
-        
-        优先级（从高到低）：
-        1. 用户黑名单（denied_translators）- 最高优先级
-        2. 用户白名单（allowed_translators）- 可以解锁用户组黑名单
-        3. 用户组黑名单
-        4. 用户组白名单
-        
-        Args:
-            username: 用户名
-            translator: 翻译器名称
-        
-        Returns:
-            bool: 用户是否有权限使用该翻译器
-        """
-        account = self.account_service.get_user(username)
-        if not account:
-            logger.warning(f"User not found: {username}")
-            return False
-        
-        permissions = account.permissions
-        
-        # 获取用户的白名单和黑名单
-        user_allowed = set(permissions.allowed_translators) if permissions.allowed_translators else set()
-        user_denied = set(permissions.denied_translators) if permissions.denied_translators else set()
-        
-        # 1. 用户黑名单（最高优先级）
-        if translator in user_denied:
-            return False
-        
-        # 2. 用户白名单（可以解锁用户组黑名单）
-        if "*" in user_allowed or translator in user_allowed:
-            return True
-        
-        # 3. 获取用户组的翻译器配置
+    def _resolve_feature_permission_fields(self, feature_type: str) -> tuple[str, str]:
+        fields = self.FEATURE_PERMISSION_FIELDS.get(feature_type)
+        if not fields:
+            raise ValueError(f"Unsupported feature type: {feature_type}")
+        return fields
+
+    def _get_group_feature_permissions(self, account, allowed_field: str, denied_field: str) -> tuple[set, set]:
+        group_allowed = set()
+        group_denied = set()
+
         try:
             from manga_translator.server.core.group_management_service import (
                 get_group_management_service,
             )
             group_service = get_group_management_service()
             group = group_service.get_group(account.group)
-            
+
             if group:
-                group_allowed = set(group.get('allowed_translators', ['*']))
-                group_denied = set(group.get('denied_translators', []))
-                
-                # 用户组黑名单
-                if translator in group_denied:
-                    return False
-                
-                # 用户组白名单
-                if "*" in group_allowed or translator in group_allowed:
-                    return True
+                group_allowed = set(group.get(allowed_field, []))
+                group_denied = set(group.get(denied_field, []))
         except Exception as e:
-            logger.warning(f"Failed to get group translator permissions: {e}")
-        
-        # 默认允许（如果没有任何配置）
-        return "*" in user_allowed
+            logger.warning(f"Failed to get group permissions for {allowed_field}: {e}")
+
+        return group_allowed, group_denied
+
+    def check_feature_permission(self, username: str, feature_type: str, feature_name: str) -> bool:
+        """
+        检查指定能力的权限。
+
+        优先级（从高到低）：
+        1. 用户黑名单
+        2. 用户白名单（可解锁用户组黑名单）
+        3. 用户组黑名单
+        4. 用户组白名单
+        """
+        account = self.account_service.get_user(username)
+        if not account:
+            logger.warning(f"User not found: {username}")
+            return False
+
+        allowed_field, denied_field = self._resolve_feature_permission_fields(feature_type)
+        permissions = account.permissions
+
+        user_allowed = set(getattr(permissions, allowed_field, []) or [])
+        user_denied = set(getattr(permissions, denied_field, []) or [])
+
+        if feature_name in user_denied:
+            return False
+
+        if "*" in user_allowed or feature_name in user_allowed:
+            return True
+
+        group_allowed, group_denied = self._get_group_feature_permissions(
+            account,
+            allowed_field,
+            denied_field,
+        )
+
+        if feature_name in group_denied:
+            return False
+
+        if not group_allowed or "*" in group_allowed or feature_name in group_allowed:
+            return True
+
+        return False
+
+    def filter_allowed_options(self, username: str, feature_type: str, options: list[str]) -> list[str]:
+        """根据用户权限过滤选项列表。"""
+        return [
+            option for option in options
+            if self.check_feature_permission(username, feature_type, option)
+        ]
+
+    def check_translator_permission(self, username: str, translator: str) -> bool:
+        """检查翻译器权限。"""
+        return self.check_feature_permission(username, 'translator', translator)
+
+    def check_ocr_permission(self, username: str, ocr: str) -> bool:
+        """检查 OCR 权限。"""
+        return self.check_feature_permission(username, 'ocr', ocr)
+
+    def check_colorizer_permission(self, username: str, colorizer: str) -> bool:
+        """检查上色器权限。"""
+        return self.check_feature_permission(username, 'colorizer', colorizer)
+
+    def check_renderer_permission(self, username: str, renderer: str) -> bool:
+        """检查渲染器权限。"""
+        return self.check_feature_permission(username, 'renderer', renderer)
+
+    def check_workflow_permission(self, username: str, workflow: str) -> bool:
+        """检查工作流权限。"""
+        return self.check_feature_permission(username, 'workflow', workflow)
     
     def check_parameter_permission(self, username: str, parameter: str) -> bool:
         """
@@ -413,12 +453,11 @@ class PermissionService:
         
         # 过滤翻译器列表
         if 'translators' in filtered_config:
-            if "*" not in permissions.allowed_translators:
-                # 只保留用户有权限的翻译器
-                filtered_config['translators'] = [
-                    t for t in filtered_config['translators']
-                    if t in permissions.allowed_translators
-                ]
+            filtered_config['translators'] = self.filter_allowed_options(
+                username,
+                'translator',
+                filtered_config['translators'],
+            )
         
         # 过滤参数
         if 'parameters' in filtered_config:
@@ -430,6 +469,10 @@ class PermissionService:
         # 添加用户权限信息
         filtered_config['user_permissions'] = {
             'allowed_translators': permissions.allowed_translators,
+            'allowed_ocr': permissions.allowed_ocr,
+            'allowed_colorizers': permissions.allowed_colorizers,
+            'allowed_renderers': permissions.allowed_renderers,
+            'allowed_workflows': permissions.allowed_workflows,
             'allowed_parameters': permissions.allowed_parameters,
             'max_concurrent_tasks': permissions.max_concurrent_tasks,
             'daily_quota': permissions.daily_quota,

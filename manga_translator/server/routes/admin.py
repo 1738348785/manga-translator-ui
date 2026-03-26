@@ -30,6 +30,7 @@ from manga_translator.server.core.task_manager import (
     active_tasks,
     active_tasks_lock,
 )
+from manga_translator.server_paths import SERVER_DATA_DIR, USER_RESOURCES_DIR
 
 logger = logging.getLogger('manga_translator.server')
 
@@ -271,15 +272,9 @@ def get_directory_stats(directory: str) -> dict:
 @router.get("/storage/info")
 async def get_storage_info(session: Session = Depends(require_admin)):
     """获取存储使用情况。"""
-    # 获取各目录路径 - 使用 server 模块内的数据目录
-    server_dir = os.path.dirname(os.path.dirname(__file__))  # manga_translator/server
-    data_dir = os.path.join(server_dir, "data")
-    results_dir = os.path.join(data_dir, "results")
-    
-    # 用户上传的资源目录
-    user_resources_dir = os.path.join(server_dir, "user_resources")
-    user_fonts_dir = os.path.join(user_resources_dir, "fonts")
-    user_prompts_dir = os.path.join(user_resources_dir, "prompts")
+    results_dir = str(SERVER_DATA_DIR / "results")
+    user_fonts_dir = str(USER_RESOURCES_DIR / "fonts")
+    user_prompts_dir = str(USER_RESOURCES_DIR / "prompts")
     
     # 获取统计信息
     results_stats = get_directory_stats(results_dir)
@@ -316,17 +311,12 @@ async def cleanup_storage(
     """清理指定目录。"""
     import shutil
 
-    # 使用 server 模块内的数据目录
-    server_dir = os.path.dirname(os.path.dirname(__file__))  # manga_translator/server
-    data_dir = os.path.join(server_dir, "data")
-    user_resources_dir = os.path.join(server_dir, "user_resources")
-    
     targets = {
         "uploads": [
-            os.path.join(user_resources_dir, "fonts"),
-            os.path.join(user_resources_dir, "prompts")
+            str(USER_RESOURCES_DIR / "fonts"),
+            str(USER_RESOURCES_DIR / "prompts")
         ],
-        "results": [os.path.join(data_dir, "results")],
+        "results": [str(SERVER_DATA_DIR / "results")],
         "cache": []  # 暂无独立缓存目录
     }
     

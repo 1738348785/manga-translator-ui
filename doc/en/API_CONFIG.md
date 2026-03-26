@@ -11,6 +11,7 @@ This document explains how to register, choose, and configure the most commonly 
 - [SiliconFlow API Setup](#siliconflow-api-setup)
 - [DeepSeek API Setup](#deepseek-api-setup)
 - [Google Gemini API Setup](#google-gemini-api-setup)
+- [Vertex API Setup](#vertex-api-setup)
 - [API OCR Setup (OpenAI OCR / Gemini OCR)](#api-ocr-setup-openai-ocr--gemini-ocr)
 - [API Colorization Setup (OpenAI Colorizer / Gemini Colorizer)](#api-colorization-setup-openai-colorizer--gemini-colorizer)
 - [API Rendering Setup (OpenAI Renderer / Gemini Renderer)](#api-rendering-setup-openai-renderer--gemini-renderer)
@@ -40,9 +41,11 @@ The current `Translator` dropdown on `Translation Interface` separates text-only
 - **Text-only translators**:
   - `OpenAI`
   - `Google Gemini`
+  - `Vertex`
 - **Multimodal translators**:
   - `OpenAI High Quality`
   - `Gemini High Quality`
+  - `Vertex High Quality`
 
 Use the high-quality translators when your selected model supports image input.
 
@@ -91,7 +94,7 @@ Common operations on this page:
 
 The app currently provides two main translator interface styles:
 
-#### Text-only translators (`OpenAI` / `Google Gemini`)
+#### Text-only translators (`OpenAI` / `Google Gemini` / `Vertex`)
 
 - use text API requests
 - only send OCR text
@@ -99,7 +102,7 @@ The app currently provides two main translator interface styles:
 - cheaper
 - good for simpler workloads
 
-#### High-quality translators (`OpenAI High Quality` / `Gemini High Quality`)
+#### High-quality translators (`OpenAI High Quality` / `Gemini High Quality` / `Vertex High Quality`)
 
 - use multimodal requests
 - send image plus text
@@ -132,6 +135,15 @@ If your provider offers an OpenAI-compatible interface, you can usually configur
 - The app adds the API version path automatically
 - If you use an official Google AI Studio key, leaving `Gemini API Base` empty is usually fine
 
+#### Vertex APIs
+
+- The Vertex translator path always uses the fixed official Gemini host:
+  - `https://generativelanguage.googleapis.com`
+- There is no public `VERTEX_API_BASE` field
+- You only configure:
+  - `VERTEX_API_KEY`
+  - `VERTEX_MODEL`
+
 ### Current translation-tab field names
 
 On `API Management` -> `Translation`, the most commonly used rows are:
@@ -142,6 +154,8 @@ On `API Management` -> `Translation`, the most commonly used rows are:
 - `Gemini API Key`
 - `Gemini Model`
 - `Gemini API Base`
+- `Vertex API Key`
+- `Vertex Model`
 - `DeepSeek API Key`
 - `DeepSeek Model`
 - `DeepSeek API Base`
@@ -309,6 +323,42 @@ If you want multimodal translation:
 Suggested model choices from the source guide:
 
 - `gemini-2.5-pro`: best quality, stable for line breaking
+- `gemini-2.5-flash`: faster and cheaper
+
+---
+
+## Vertex API Setup
+
+The Vertex translator path reuses the official Gemini backend but keeps a separate `VERTEX_*` credential namespace. Use it when you want to isolate one Google-official key/model setup from the normal Gemini configuration.
+
+Important behavior:
+
+- The host is fixed internally to `https://generativelanguage.googleapis.com`
+- There is no public `VERTEX_API_BASE` field
+- In the web server UI, Vertex translators are hidden from the translator dropdown by default, but the admin API-key page still exposes the matching `VERTEX_*` fields
+
+### 1. Get an API key
+
+1. Visit [Google AI Studio](https://aistudio.google.com/apikey)
+2. Sign in with a Google account
+3. Click `Create API Key`
+4. Select or create a Google Cloud project
+5. Copy the generated API key
+
+### 2. Configure it in the app
+
+1. Open `Translation Interface`
+2. Set `Translator` to `Vertex` or `Vertex High Quality`
+3. Open `API Management`
+4. Open `Translation`
+5. Fill:
+   - `Vertex API Key`: your Google API key
+   - `Vertex Model`: choose the model you want
+6. Click `Test`
+
+Suggested model choices:
+
+- `gemini-2.5-pro`: best quality
 - `gemini-2.5-flash`: faster and cheaper
 
 ---

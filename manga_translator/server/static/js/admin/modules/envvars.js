@@ -4,39 +4,10 @@ class EnvVarsModule {
         this.app = app;
         this.presets = [];
         this.groups = [];
-        // 完整的API密钥配置列表
-        this.envKeyGroups = [
-            {
-                name: 'OpenAI / ChatGPT',
-                i18nKey: 'translator_openai',
-                keys: [
-                    { key: 'OPENAI_API_KEY', i18n: 'label_OPENAI_API_KEY', type: 'password', placeholder: 'sk-...' },
-                    { key: 'OPENAI_API_BASE', i18n: 'label_OPENAI_API_BASE', type: 'text', placeholder: 'https://api.openai.com/v1' },
-                    { key: 'OPENAI_MODEL', i18n: 'label_OPENAI_MODEL', type: 'text', placeholder: 'gpt-4o' }
-                ]
-            },
-            {
-                name: 'Google Gemini',
-                i18nKey: 'translator_gemini',
-                keys: [
-                    { key: 'GEMINI_API_KEY', i18n: 'label_GEMINI_API_KEY', type: 'password', placeholder: 'AIza...' },
-                    { key: 'GEMINI_MODEL', i18n: 'label_GEMINI_MODEL', type: 'text', placeholder: 'gemini-1.5-flash' },
-                    { key: 'GEMINI_API_BASE', i18n: 'label_GEMINI_API_BASE', type: 'text', placeholder: '' }
-                ]
-            },
-            {
-                name: 'DeepSeek',
-                keys: [
-                    { key: 'DEEPSEEK_API_KEY', i18n: 'label_DEEPSEEK_API_KEY', type: 'password', placeholder: 'sk-...' },
-                    { key: 'DEEPSEEK_API_BASE', i18n: 'label_DEEPSEEK_API_BASE', type: 'text', placeholder: 'https://api.deepseek.com' },
-                    { key: 'DEEPSEEK_MODEL', i18n: 'label_DEEPSEEK_MODEL', type: 'text', placeholder: 'deepseek-chat' }
-                ]
-            },
-
-        ];
-        
-        // 扁平化的key列表用于加载
-        this.envKeys = this.envKeyGroups.flatMap(g => g.keys.map(k => k.key));
+        const schema = window.ApiKeySchema || { categories: [], groups: [], envKeys: [] };
+        this.envKeyCategories = schema.categories || [];
+        this.envKeyGroups = schema.groups || [];
+        this.envKeys = schema.envKeys || this.envKeyGroups.flatMap(group => group.keys.map(item => item.key));
     }
     
     t(key, fallback) {
@@ -44,6 +15,7 @@ class EnvVarsModule {
     }
     
     async load() {
+        this.renderServerEnvVars();
         await Promise.all([
             this.loadEnvVars(),
             this.loadPresets(),
@@ -63,8 +35,8 @@ class EnvVarsModule {
                 
                 this.envKeys.forEach(key => {
                     const input = document.getElementById(`env-${key}`);
-                    if (input && vars[key]) {
-                        input.value = vars[key];
+                    if (input) {
+                        input.value = vars[key] || '';
                     }
                 });
             }
@@ -150,28 +122,49 @@ class EnvVarsModule {
             </div>
         `}).join('');
     }
+
+    renderServerEnvVars() {
+        const container = document.getElementById('server-env-groups');
+        if (!container) return;
+        container.innerHTML = this.generateApiKeyFormHtml('env');
+    }
     
     // 生成API密钥输入表单HTML
     generateApiKeyFormHtml(prefix = 'preset', existingConfig = {}) {
-        return this.envKeyGroups.map(group => `
-            <div class="env-group" style="margin-bottom:16px;padding:16px;background:linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-                <h5 style="margin:0 0 12px 0;font-size:14px;font-weight:600;color:#1e293b;display:flex;align-items:center;gap:8px;">
-                    <span style="width:8px;height:8px;background:#3b82f6;border-radius:50%;"></span>
-                    ${this.t(group.i18nKey, group.name)}
-                </h5>
-                <div class="form-grid" style="gap:12px;">
-                    ${group.keys.map(k => `
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label class="form-label" style="font-size:12px;color:#64748b;">${this.t(k.i18n, k.key)}</label>
-                            <input type="${k.type}" class="form-input" id="${prefix}-${k.key}" 
-                                   value="${this.escapeHtml(existingConfig[k.key] || '')}"
-                                   placeholder="${k.placeholder}" 
-                                   style="font-size:13px;background:#fff;border:1px solid #cbd5e1;">
+        return this.envKeyCategories.map(category => {
+            const groups = this.envKeyGroups.filter(group => group.category === category.id);
+            if (!groups.length) {
+                return '';
+            }
+
+            return `
+                <div class="env-category" style="margin-bottom:24px;">
+                    <div style="margin-bottom:10px;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;">
+                        ${this.t(category.i18nKey, category.fallback)}
+                    </div>
+                    ${groups.map(group => `
+                        <div class="env-group" style="margin-bottom:16px;padding:16px;background:linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);border-radius:12px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                            <h5 style="margin:0 0 12px 0;font-size:14px;font-weight:600;color:#1e293b;display:flex;align-items:center;gap:8px;">
+                                <span style="width:8px;height:8px;background:#3b82f6;border-radius:50%;"></span>
+                                ${group.i18nKey ? this.t(group.i18nKey, group.name) : group.name}
+                            </h5>
+                            ${group.note ? `<p style="margin:0 0 12px 0;font-size:12px;color:#64748b;">${this.escapeHtml(group.note)}</p>` : ''}
+                            <div class="form-grid" style="gap:12px;">
+                                ${group.keys.map(item => `
+                                    <div class="form-group" style="margin-bottom:0;">
+                                        <label class="form-label" style="font-size:12px;color:#64748b;">${this.t(item.i18n, item.key)}</label>
+                                        <input type="${item.type}" class="form-input" id="${prefix}-${item.key}"
+                                               value="${this.escapeHtml(existingConfig[item.key] || '')}"
+                                               placeholder="${item.placeholder}"
+                                               style="font-size:13px;background:#fff;border:1px solid #cbd5e1;">
+                                    </div>
+                                `).join('')}
+                            </div>
                         </div>
                     `).join('')}
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     }
     
     // 生成用户组选择器HTML
@@ -474,7 +467,7 @@ class EnvVarsModule {
         
         this.envKeys.forEach(key => {
             const input = document.getElementById(`env-${key}`);
-            if (input && input.value.trim()) {
+            if (input) {
                 envVars[key] = input.value.trim();
             }
         });

@@ -54,6 +54,8 @@ class PresetService:
             "GEMINI_API_KEY",
             "GEMINI_API_BASE",
             "GEMINI_MODEL",
+            "VERTEX_API_KEY",
+            "VERTEX_MODEL",
             "SAKURA_API_BASE",
             "SAKURA_DICT_PATH",
             "OCR_OPENAI_API_KEY",

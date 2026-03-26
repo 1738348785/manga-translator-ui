@@ -44,6 +44,12 @@ class UpdatePermissionsRequest(BaseModel):
     """更新权限请求"""
     allowed_translators: Optional[List[str]] = Field(None, description="允许使用的翻译器列表（白名单）")
     denied_translators: Optional[List[str]] = Field(None, description="禁止使用的翻译器列表（黑名单）")
+    allowed_ocr: Optional[List[str]] = Field(None, description="允许使用的 OCR 列表（白名单）")
+    denied_ocr: Optional[List[str]] = Field(None, description="禁止使用的 OCR 列表（黑名单）")
+    allowed_colorizers: Optional[List[str]] = Field(None, description="允许使用的上色器列表（白名单）")
+    denied_colorizers: Optional[List[str]] = Field(None, description="禁止使用的上色器列表（黑名单）")
+    allowed_renderers: Optional[List[str]] = Field(None, description="允许使用的渲染器列表（白名单）")
+    denied_renderers: Optional[List[str]] = Field(None, description="禁止使用的渲染器列表（黑名单）")
     allowed_workflows: Optional[List[str]] = Field(None, description="允许使用的工作流列表（白名单）")
     denied_workflows: Optional[List[str]] = Field(None, description="禁止使用的工作流列表（黑名单）")
     allowed_parameters: Optional[List[str]] = Field(None, description="允许调整的参数列表（白名单）")
@@ -493,6 +499,24 @@ async def update_user_permissions(
         if request.denied_translators is not None:
             permissions_dict['denied_translators'] = request.denied_translators
             updated_fields.append('denied_translators')
+        if request.allowed_ocr is not None:
+            permissions_dict['allowed_ocr'] = request.allowed_ocr
+            updated_fields.append('allowed_ocr')
+        if request.denied_ocr is not None:
+            permissions_dict['denied_ocr'] = request.denied_ocr
+            updated_fields.append('denied_ocr')
+        if request.allowed_colorizers is not None:
+            permissions_dict['allowed_colorizers'] = request.allowed_colorizers
+            updated_fields.append('allowed_colorizers')
+        if request.denied_colorizers is not None:
+            permissions_dict['denied_colorizers'] = request.denied_colorizers
+            updated_fields.append('denied_colorizers')
+        if request.allowed_renderers is not None:
+            permissions_dict['allowed_renderers'] = request.allowed_renderers
+            updated_fields.append('allowed_renderers')
+        if request.denied_renderers is not None:
+            permissions_dict['denied_renderers'] = request.denied_renderers
+            updated_fields.append('denied_renderers')
         if request.allowed_workflows is not None:
             permissions_dict['allowed_workflows'] = request.allowed_workflows
             updated_fields.append('allowed_workflows')

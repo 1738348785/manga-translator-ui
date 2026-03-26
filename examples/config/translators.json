@@ -55,6 +55,24 @@
       "GEMINI_API_BASE"
     ]
   },
+  "vertex": {
+    "name": "vertex",
+    "display_name": "Vertex",
+    "required_env_vars": [],
+    "optional_env_vars": [
+      "VERTEX_API_KEY",
+      "VERTEX_MODEL"
+    ]
+  },
+  "vertex_hq": {
+    "name": "vertex_hq",
+    "display_name": "高质量翻译 Vertex",
+    "required_env_vars": [],
+    "optional_env_vars": [
+      "VERTEX_API_KEY",
+      "VERTEX_MODEL"
+    ]
+  },
   "sakura": {
     "name": "sakura",
     "display_name": "Sakura",

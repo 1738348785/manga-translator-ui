@@ -11,10 +11,16 @@ COLORIZERS = {
     Colorizer.gemini_colorizer: GeminiColorizer,
 }
 colorizer_cache = {}
+NON_CACHED_COLORIZERS = {
+    Colorizer.openai_colorizer,
+    Colorizer.gemini_colorizer,
+}
 
 def get_colorizer(key: Colorizer, *args, **kwargs) -> CommonColorizer:
     if key not in COLORIZERS:
         raise ValueError(f'Could not find colorizer for: "{key}". Choose from the following: %s' % ','.join(COLORIZERS))
+    if key in NON_CACHED_COLORIZERS:
+        return COLORIZERS[key](*args, **kwargs)
     if not colorizer_cache.get(key):
         upscaler = COLORIZERS[key]
         colorizer_cache[key] = upscaler(*args, **kwargs)

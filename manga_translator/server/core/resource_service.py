@@ -12,6 +12,7 @@ from typing import List, Optional
 
 from manga_translator.server.models.resource_models import FontResource, PromptResource
 from manga_translator.server.repositories.resource_repository import ResourceRepository
+from manga_translator.server_paths import USER_RESOURCES_RELATIVE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class ResourceManagementService:
         self,
         prompts_repo: ResourceRepository,
         fonts_repo: ResourceRepository,
-        base_path: str = "manga_translator/server/user_resources"
+        base_path: str = USER_RESOURCES_RELATIVE_DIR
     ):
         """
         初始化资源管理服务

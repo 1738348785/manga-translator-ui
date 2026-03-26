@@ -11,6 +11,7 @@
 - [硅基流动 API 配置](#硅基流动-api-配置)
 - [DeepSeek API 配置](#deepseek-api-配置)
 - [Google Gemini API 配置](#google-gemini-api-配置)
+- [Vertex API 配置](#vertex-api-配置)
 - [常见问题](#常见问题)
 
 ---
@@ -54,13 +55,13 @@
 
 程序提供了两类翻译器，它们的区别只是**接口不同**：
 
-#### 普通翻译器（OpenAI / Gemini）
+#### 普通翻译器（OpenAI / Gemini / Vertex）
 - 使用纯文本 API
 - 只发送识别出的文字
 - 翻译速度快，消耗少
 - 适合简单场景
 
-#### 高质量翻译器（高质量翻译 OpenAI / 高质量翻译 Gemini）
+#### 高质量翻译器（高质量翻译 OpenAI / 高质量翻译 Gemini / 高质量翻译 Vertex）
 - 使用多模态 API（支持图片）
 - 发送图片 + 文字
 - AI 可以"看到"图片，理解场景
@@ -89,6 +90,11 @@ OpenAI 翻译器**几乎支持市面上所有模型**，因为几乎所有的 AI
   - 填写：`https://generativelanguage.googleapis.com`
   - 程序会自动添加 `/v1beta`
 - **使用 AI Studio 官方 key**：无需填写 API 地址（自动使用默认地址）
+
+#### Vertex 接口
+- **固定官方地址**：程序内部写死为 `https://generativelanguage.googleapis.com`
+- **不提供 `VERTEX_API_BASE` 配置项**：只需要填写 `VERTEX_API_KEY` 和 `VERTEX_MODEL`
+- **适用场景**：想和 Gemini 分开管理一套 Google 官方 Key / 模型配置时使用
 
 ---
 
@@ -185,8 +191,37 @@ Google Gemini 是 Google 最新的多模态 AI 模型，性能强劲。
    - **API Key**：你的 Gemini API Key
    - **Base URL**：无需填写（自动使用默认地址）
    - **模型**：
-     - `gemini-2.5-pro`：断句稳定，质量最高 ⭐ 推荐
+      - `gemini-2.5-pro`：断句稳定，质量最高 ⭐ 推荐
       - `gemini-2.5-flash`：速度快，价格便宜
+
+---
+
+## Vertex API 配置
+
+Vertex 系列复用 Google 官方 Gemini 接口，但使用独立的 `VERTEX_*` 参数，适合把另一套 Google 官方 Key / 模型与 Gemini 配置分开管理。
+
+> 💡 **说明**：
+> - `vertex` / `vertex_hq` 固定使用官方地址 `https://generativelanguage.googleapis.com`
+> - 不提供 `VERTEX_API_BASE`
+> - 服务端网页端默认不在翻译器下拉中显示 Vertex 系列，但管理员 API Key 管理中可配置对应参数
+
+### 1. 获取 API Key
+
+1. 访问 [Google AI Studio](https://aistudio.google.com/apikey)
+2. 登录 Google 账号
+3. 点击"Create API Key"
+4. 选择 Google Cloud 项目（或创建新项目）
+5. 复制生成的 API Key
+
+### 2. 配置到程序中
+
+1. 打开程序
+2. 在桌面端"基础设置"→"翻译器"中选择"Vertex"或"高质量翻译 Vertex"
+3. 在 API Key 管理中填写：
+   - **Vertex API Key**：你的 Google API Key
+   - **Vertex 模型**：
+     - `gemini-2.5-pro`：质量最高 ⭐ 推荐
+     - `gemini-2.5-flash`：速度快，价格便宜
 
 ---
 

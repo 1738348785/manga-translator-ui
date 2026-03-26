@@ -275,6 +275,18 @@ async def verify_translation_auth(
                 }
             }
         )
+
+    if not session_service.update_activity(session_token):
+        logger.warning("Translation request with expired token during activity refresh")
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error": {
+                    "code": "INVALID_TOKEN",
+                    "message": "会话令牌无效或已过期，请重新登录"
+                }
+            }
+        )
     
     username = session.username
     ip_address = request.client.host if request.client else "unknown"
@@ -293,45 +305,117 @@ async def verify_translation_auth(
         else:
             translator = "unknown"
     
-    # Check translator permission (now using the correct translator after defaults applied)
-    has_permission = permission_service.check_translator_permission(username, translator)
-    
-    if not has_permission:
-        permissions = permission_service.get_user_permissions(username)
-        allowed_translators = permissions.allowed_translators if permissions else []
-        
-        logger.warning(
-            f"Permission denied: User '{username}' attempted to use "
-            f"unauthorized translator '{translator}'"
-        )
-        
-        # Log audit event
-        audit_service = get_audit_service()
-        audit_service.log_event(
-            event_type="permission_denied",
-            username=username,
-            ip_address=ip_address,
-            details={
-                "translator": translator,
-                "reason": "translator_not_allowed",
-                "allowed_translators": allowed_translators
-            },
-            result="failure"
-        )
-        
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": {
-                    "code": "TRANSLATOR_PERMISSION_DENIED",
-                    "message": f"您没有权限使用翻译器 '{translator}'",
-                    "details": {
-                        "translator": translator,
-                        "allowed_translators": allowed_translators
+    permissions = permission_service.get_user_permissions(username)
+
+    def _feature_value(value) -> str:
+        if value is None:
+            return ''
+        return str(getattr(value, 'value', value) or '')
+
+    def _assert_feature_permission(
+        feature_type: str,
+        feature_name: str,
+        checker,
+        allowed_attr: str,
+        allowed_details_key: str,
+        code: str,
+        label: str,
+    ) -> None:
+        if not checker(username, feature_name):
+            allowed_values = getattr(permissions, allowed_attr, []) if permissions else []
+
+            logger.warning(
+                f"Permission denied: User '{username}' attempted to use "
+                f"unauthorized {feature_type} '{feature_name}'"
+            )
+
+            audit_service = get_audit_service()
+            audit_service.log_event(
+                event_type="permission_denied",
+                username=username,
+                ip_address=ip_address,
+                details={
+                    feature_type: feature_name,
+                    "reason": f"{feature_type}_not_allowed",
+                    allowed_details_key: allowed_values,
+                },
+                result="failure",
+            )
+
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": {
+                        "code": code,
+                        "message": f"您没有权限使用{label} '{feature_name}'",
+                        "details": {
+                            feature_type: feature_name,
+                            allowed_details_key: allowed_values,
+                        },
                     }
-                }
-            }
-        )
+                },
+            )
+
+    _assert_feature_permission(
+        'translator',
+        translator,
+        permission_service.check_translator_permission,
+        'allowed_translators',
+        'allowed_translators',
+        'TRANSLATOR_PERMISSION_DENIED',
+        '翻译器',
+    )
+
+    if hasattr(config, 'ocr'):
+        primary_ocr = _feature_value(getattr(config.ocr, 'ocr', ''))
+        if primary_ocr:
+            _assert_feature_permission(
+                'ocr',
+                primary_ocr,
+                permission_service.check_ocr_permission,
+                'allowed_ocr',
+                'allowed_ocr',
+                'OCR_PERMISSION_DENIED',
+                'OCR',
+            )
+
+        secondary_ocr = _feature_value(getattr(config.ocr, 'secondary_ocr', ''))
+        if secondary_ocr and secondary_ocr != primary_ocr:
+            _assert_feature_permission(
+                'ocr',
+                secondary_ocr,
+                permission_service.check_ocr_permission,
+                'allowed_ocr',
+                'allowed_ocr',
+                'OCR_PERMISSION_DENIED',
+                'OCR',
+            )
+
+    if hasattr(config, 'colorizer'):
+        colorizer = _feature_value(getattr(config.colorizer, 'colorizer', ''))
+        if colorizer:
+            _assert_feature_permission(
+                'colorizer',
+                colorizer,
+                permission_service.check_colorizer_permission,
+                'allowed_colorizers',
+                'allowed_colorizers',
+                'COLORIZER_PERMISSION_DENIED',
+                '上色器',
+            )
+
+    if hasattr(config, 'render'):
+        renderer = _feature_value(getattr(config.render, 'renderer', ''))
+        if renderer:
+            _assert_feature_permission(
+                'renderer',
+                renderer,
+                permission_service.check_renderer_permission,
+                'allowed_renderers',
+                'allowed_renderers',
+                'RENDERER_PERMISSION_DENIED',
+                '渲染器',
+            )
     
     # 注意：并发限制检查和计数增加由路由层的 track_task_start/track_task_end 负责
     # 这里只做认证和权限检查，不修改计数器

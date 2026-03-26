@@ -10,6 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Header
 
+from manga_translator.server.core.api_key_policy import get_effective_api_key_policy
 from manga_translator.server.core.config_manager import (
     AVAILABLE_WORKFLOWS,
     FONTS_DIR,
@@ -18,19 +19,77 @@ from manga_translator.server.core.config_manager import (
 )
 from manga_translator.server.core.middleware import get_services, require_auth
 from manga_translator.server.core.models import Session
+from manga_translator.server.core.response_utils import get_user_preset_env_state
+from manga_translator.server_paths import USER_RESOURCES_RELATIVE_DIR
 from manga_translator.utils import BASE_PATH
 
 router = APIRouter(tags=["config"])
 
-SERVER_HIDDEN_OCR_OPTIONS = {"openai_ocr", "gemini_ocr"}
-SERVER_HIDDEN_RENDERER_OPTIONS = {"openai_renderer", "gemini_renderer"}
-SERVER_HIDDEN_COLORIZER_OPTIONS = {"openai_colorizer", "gemini_colorizer"}
+SERVER_HIDDEN_OCR_OPTIONS = set()
+SERVER_HIDDEN_RENDERER_OPTIONS = set()
+SERVER_HIDDEN_COLORIZER_OPTIONS = set()
+SERVER_HIDDEN_TRANSLATOR_OPTIONS = set()
 SERVER_HIDDEN_CONFIG_KEYS = {
     "use_custom_api_params",
     "ocr.ai_ocr_concurrency",
     "render.ai_renderer_concurrency",
     "colorizer.ai_colorizer_history_pages",
 }
+
+WEB_API_ENV_KEYS = {
+    "OPENAI_API_KEY",
+    "OPENAI_API_BASE",
+    "OPENAI_MODEL",
+    "GEMINI_API_KEY",
+    "GEMINI_API_BASE",
+    "GEMINI_MODEL",
+    "VERTEX_API_KEY",
+    "VERTEX_MODEL",
+    "OCR_OPENAI_API_KEY",
+    "OCR_OPENAI_API_BASE",
+    "OCR_OPENAI_MODEL",
+    "OCR_GEMINI_API_KEY",
+    "OCR_GEMINI_API_BASE",
+    "OCR_GEMINI_MODEL",
+    "COLOR_OPENAI_API_KEY",
+    "COLOR_OPENAI_API_BASE",
+    "COLOR_OPENAI_MODEL",
+    "COLOR_GEMINI_API_KEY",
+    "COLOR_GEMINI_API_BASE",
+    "COLOR_GEMINI_MODEL",
+    "RENDER_OPENAI_API_KEY",
+    "RENDER_OPENAI_API_BASE",
+    "RENDER_OPENAI_MODEL",
+    "RENDER_GEMINI_API_KEY",
+    "RENDER_GEMINI_API_BASE",
+    "RENDER_GEMINI_MODEL",
+}
+
+
+def _load_server_web_env_vars() -> dict:
+    from dotenv import dotenv_values
+
+    env_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env')
+    if not os.path.exists(env_path):
+        return {}
+
+    env_vars = dotenv_values(env_path)
+    return {
+        key: value for key, value in env_vars.items()
+        if key in WEB_API_ENV_KEYS and value
+    }
+
+
+def _resolve_username_from_token(x_session_token: Optional[str]) -> Optional[str]:
+    if not x_session_token:
+        return None
+
+    try:
+        _, session_service, _ = get_services()
+        session = session_service.verify_token(x_session_token)
+        return session.username if session else None
+    except Exception:
+        return None
 
 
 def _get_server_ocr_options():
@@ -57,6 +116,12 @@ def _get_server_keep_lang_options():
     return ['none'] + list(KEEP_LANGUAGES.keys())
 
 
+def _get_server_translator_options():
+    from manga_translator.config import Translator
+
+    return [member.value for member in Translator if member.value not in SERVER_HIDDEN_TRANSLATOR_OPTIONS]
+
+
 def _filter_server_hidden_config(config_dict: dict) -> dict:
     filtered = {}
     for section, content in config_dict.items():
@@ -70,6 +135,24 @@ def _filter_server_hidden_config(config_dict: dict) -> dict:
                 filtered[section] = visible_content
         elif section not in SERVER_HIDDEN_CONFIG_KEYS:
             filtered[section] = content
+    return filtered
+
+
+def _filter_options_by_permissions(options: dict, username: str, permission_service) -> dict:
+    filtered = dict(options)
+    feature_option_map = {
+        'translator': 'translator',
+        'ocr': 'ocr',
+        'secondary_ocr': 'ocr',
+        'colorizer': 'colorizer',
+        'renderer': 'renderer',
+    }
+
+    for key, feature_type in feature_option_map.items():
+        values = filtered.get(key)
+        if isinstance(values, list):
+            filtered[key] = permission_service.filter_allowed_options(username, feature_type, values)
+
     return filtered
 
 
@@ -106,7 +189,11 @@ async def get_config_defaults():
         'can_use_api': True,
         'can_export_text': True,
         'can_view_history': True,
-        'can_view_logs': False
+        'can_view_logs': False,
+        'show_env_editor': False,
+        'allow_server_keys': True,
+        'require_user_keys': False,
+        'save_user_keys_to_server': False,
     }
     
     return config
@@ -271,6 +358,9 @@ async def get_config(
             'role': session.role,
             'group': account.group,
             'allowed_translators': permissions.allowed_translators,
+            'allowed_ocr': getattr(permissions, 'allowed_ocr', []),
+            'allowed_colorizers': getattr(permissions, 'allowed_colorizers', []),
+            'allowed_renderers': getattr(permissions, 'allowed_renderers', []),
             'allowed_parameters': permissions.allowed_parameters,
             'allowed_workflows': allowed_workflows,
             'max_concurrent_tasks': permissions.max_concurrent_tasks,
@@ -325,7 +415,7 @@ async def get_config_options(
     from manga_translator.config import Alignment, Direction, InpaintPrecision
     from manga_translator.detection import Detector
     from manga_translator.inpainting import Inpainter
-    from manga_translator.translators import VALID_LANGUAGES, Translator
+    from manga_translator.translators import VALID_LANGUAGES
     from manga_translator.upscaling import Upscaler
     
     # Get server font list (shared fonts)
@@ -347,16 +437,16 @@ async def get_config_options(
             session = session_service.verify_token(session_token)
             if session:
                 resource_service = get_resource_service()
-                # 用户字体使用相对路径: manga_translator/server/user_resources/fonts/{username}/{filename}
+                # 用户字体使用相对路径: manga_translator/server/data/user_resources/fonts/{username}/{filename}
                 user_font_resources = resource_service.get_user_fonts(session.username)
                 user_font_paths = [
-                    f'manga_translator/server/user_resources/fonts/{session.username}/{f.filename}' 
+                    f'{USER_RESOURCES_RELATIVE_DIR}/fonts/{session.username}/{f.filename}'
                     for f in user_font_resources
                 ]
-                # 用户提示词使用相对路径: manga_translator/server/user_resources/prompts/{username}/{filename}
+                # 用户提示词使用相对路径: manga_translator/server/data/user_resources/prompts/{username}/{filename}
                 user_prompt_resources = resource_service.get_user_prompts(session.username)
                 user_prompt_paths = [
-                    f'manga_translator/server/user_resources/prompts/{session.username}/{p.filename}' 
+                    f'{USER_RESOURCES_RELATIVE_DIR}/prompts/{session.username}/{p.filename}'
                     for p in user_prompt_resources
                 ]
         except Exception as e:
@@ -377,7 +467,7 @@ async def get_config_options(
     server_prompt_paths = [f'dict/{p}' for p in prompts]
     all_prompt_paths = server_prompt_paths + user_prompt_paths
     
-    return {
+    options = {
         'renderer': _get_server_renderer_options(),
         'alignment': [member.value for member in Alignment],
         'direction': [member.value for member in Direction],
@@ -388,7 +478,7 @@ async def get_config_options(
         'inpainting_precision': [member.value for member in InpaintPrecision],
         'ocr': _get_server_ocr_options(),
         'secondary_ocr': _get_server_ocr_options(),
-        'translator': [member.value for member in Translator],
+        'translator': _get_server_translator_options(),
         'target_lang': list(VALID_LANGUAGES),
         'keep_lang': _get_server_keep_lang_options(),
         'upscale_ratio': ['不使用', '2', '3', '4'],
@@ -427,6 +517,18 @@ async def get_config_options(
         'format': ['png', 'webp', 'jpg', 'avif']  # 移除了 xcf, psd, pdf（使用 export_editable_psd 配置项代替）
     }
 
+    if session_token:
+        try:
+            account_service, session_service, permission_service = get_services()
+            session = session_service.verify_token(session_token)
+            if session and account_service.get_user(session.username):
+                options = _filter_options_by_permissions(options, session.username, permission_service)
+        except Exception as e:
+            import logging
+            logging.getLogger('manga_translator.server').warning(f"Failed to filter config options by permissions: {e}")
+
+    return options
+
 
 # ============================================================================
 # Metadata Endpoints
@@ -459,14 +561,14 @@ async def get_translators(
         List of translators based on mode and user permissions
     """
     from manga_translator.translators import TRANSLATORS
-    all_translators = [str(t) for t in TRANSLATORS]
+    all_translators = [str(t) for t in TRANSLATORS if str(t) not in SERVER_HIDDEN_TRANSLATOR_OPTIONS]
     
     # If authenticated mode, filter based on user permissions and group config
     if mode == 'authenticated':
         if not x_session_token:
             return {"error": {"code": "NO_TOKEN", "message": "Session token required for authenticated mode"}}
         
-        account_service, session_service, _ = get_services()
+        account_service, session_service, permission_service = get_services()
         
         # Verify token
         session = session_service.verify_token(x_session_token)
@@ -478,50 +580,11 @@ async def get_translators(
         if not account:
             return []
         
-        # Get group config for translator permissions
-        group_allowed = set()
-        group_denied = set()
-        try:
-            from manga_translator.server.core.group_management_service import (
-                get_group_management_service,
-            )
-            group_service = get_group_management_service()
-            group = group_service.get_group(account.group)
-            
-            if group:
-                group_allowed = set(group.get('allowed_translators', []))
-                group_denied = set(group.get('denied_translators', []))
-        except Exception as e:
-            import logging
-            logging.getLogger('manga_translator.server').warning(f"Failed to get group config: {e}")
-        
-        # Get user permissions
-        permissions = account.permissions
-        user_allowed = set(permissions.allowed_translators) if permissions.allowed_translators else set()
-        user_denied = set(permissions.denied_translators) if hasattr(permissions, 'denied_translators') and permissions.denied_translators else set()
-        
-        # 权限逻辑: 用户黑名单 + 用户组黑名单 - 用户白名单
-        # 1. 如果用户组允许所有（*），则从所有翻译器开始
-        # 2. 否则从用户组允许的翻译器开始
-        if "*" in group_allowed:
-            result = set(all_translators)
-        else:
-            result = group_allowed.intersection(set(all_translators)) if group_allowed else set(all_translators)
-        
-        # 3. 移除用户组黑名单
-        result -= group_denied
-        
-        # 4. 移除用户黑名单
-        result -= user_denied
-        
-        # 5. 用户白名单可以解锁（如果用户有明确的白名单且不是*）
-        if user_allowed and "*" not in user_allowed:
-            # 用户白名单可以添加回被用户组禁用的翻译器
-            for t in user_allowed:
-                if t in all_translators:
-                    result.add(t)
-        
-        return sorted(list(result))
+        return permission_service.filter_allowed_options(
+            session.username,
+            'translator',
+            sorted(all_translators),
+        )
     
     # If user mode and admin set allowed translator list (legacy behavior)
     if mode == 'user' and admin_settings.get('allowed_translators'):
@@ -697,14 +760,16 @@ async def get_user_settings(
     x_session_token: Optional[str] = Header(None, alias="X-Session-Token")
 ):
     """Get user-side visibility settings (includes group quota settings)"""
+    username = _resolve_username_from_token(x_session_token)
+
     # 默认值从 admin_settings 获取
     permissions = admin_settings.get('permissions', {})
-    api_key_policy = admin_settings.get('api_key_policy', {})
+    api_key_policy = get_effective_api_key_policy(username, admin_settings)
     upload_limits = admin_settings.get('upload_limits', {})
     
     # 默认设置
     result = {
-        'show_env_editor': admin_settings.get('show_env_to_users', False),
+        'show_env_editor': api_key_policy.get('show_env_editor', False),
         'can_upload_fonts': permissions.get('can_upload_fonts', True),
         'can_upload_prompts': permissions.get('can_upload_prompts', True),
         'allow_server_keys': api_key_policy.get('allow_server_keys', True),
@@ -713,7 +778,7 @@ async def get_user_settings(
     }
     
     # 如果有用户登录，从用户组配置获取配额
-    if x_session_token:
+    if username:
         try:
             account_service, session_service, _ = get_services()
             session = session_service.verify_token(x_session_token)
@@ -762,33 +827,69 @@ async def get_user_access():
 # ============================================================================
 
 @router.get("/api-key-policy")
-async def get_api_key_policy():
+async def get_api_key_policy(
+    x_session_token: Optional[str] = Header(None, alias="X-Session-Token")
+):
     """Get API key policy for users"""
-    return admin_settings.get('api_key_policy', {
-        'require_user_keys': False,
-        'allow_server_keys': True,
-        'save_user_keys_to_server': False,
-    })
+    username = _resolve_username_from_token(x_session_token)
+    policy = get_effective_api_key_policy(username, admin_settings)
+    policy['merge_order'] = ['user_input', 'selected_preset', 'server_default']
+    policy['fallback_rule'] = 'feature_specific_then_provider_default'
+    return policy
 
 
 @router.get("/env")
 async def get_user_env_vars(session: Session = Depends(require_auth)):
-    """Get environment variables for users (based on policy)"""
-    from dotenv import dotenv_values
-    
-    # Check if users are allowed to view .env editor
-    # Note: This only controls whether users can "see" API Keys, not whether server keys are used during translation
-    show_env_to_users = admin_settings.get('show_env_to_users', False)
-    if not show_env_to_users:
-        # Don't show API Keys editor to users, return empty
+    """Do not expose server-side API key values to regular users."""
+    policy = get_effective_api_key_policy(session.username, admin_settings)
+    if not policy.get('show_env_editor', False):
         return {}
-    
-    # If showing editor, return server's API Keys values (let users see and edit)
-    env_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env')
-    if os.path.exists(env_path):
-        env_vars = dotenv_values(env_path)
-        return {key: value for key, value in env_vars.items() if value}
+
     return {}
+
+
+@router.get("/env/effective")
+async def get_effective_user_env_vars(session: Session = Depends(require_auth)):
+    """Get API key source metadata for the current user editor without secret values."""
+    policy = get_effective_api_key_policy(session.username, admin_settings)
+    if not policy.get('show_env_editor', False):
+        return {
+            'policy': policy,
+            'selected_preset_id': None,
+            'selected_preset_name': None,
+            'selected_preset_source': None,
+            'effective_keys': [],
+            'server_env_vars': {},
+            'preset_env_vars': {},
+            'merged_env_vars': {},
+            'sources': {},
+        }
+
+    server_env_vars = (
+        _load_server_web_env_vars()
+        if policy.get('allow_server_keys', True)
+        else {}
+    )
+    preset_state = await get_user_preset_env_state(session.username)
+    preset_env_vars = (preset_state or {}).get('env_vars', {})
+
+    merged_env_vars = dict(server_env_vars)
+    merged_env_vars.update(preset_env_vars)
+
+    sources = {key: 'server' for key in server_env_vars.keys()}
+    sources.update({key: 'preset' for key in preset_env_vars.keys()})
+
+    return {
+        'policy': policy,
+        'selected_preset_id': (preset_state or {}).get('preset_id'),
+        'selected_preset_name': (preset_state or {}).get('preset_name'),
+        'selected_preset_source': (preset_state or {}).get('source'),
+        'effective_keys': list(sources.keys()),
+        'server_env_vars': {},
+        'preset_env_vars': {},
+        'merged_env_vars': {},
+        'sources': sources,
+    }
 
 
 @router.post("/env")
@@ -799,14 +900,17 @@ async def save_user_env_vars(env_vars: dict, session: Session = Depends(require_
 
     from manga_translator.server.core.env_service import EnvService
     
-    # Check if users are allowed to edit .env
-    show_env_to_users = admin_settings.get('show_env_to_users', False)
-    if not show_env_to_users:
-        # Don't allow users to edit .env, return error
+    policy = get_effective_api_key_policy(session.username, admin_settings)
+    if not policy.get('show_env_editor', False):
         raise HTTPException(403, detail="Not allowed to edit environment variables")
-    
-    policy = admin_settings.get('api_key_policy', {})
+
     save_to_server = policy.get('save_user_keys_to_server', False)
+
+    filtered_env_vars = {
+        key: '' if value is None else str(value)
+        for key, value in env_vars.items()
+        if key in WEB_API_ENV_KEYS
+    }
     
     if not save_to_server:
         # Don't save to server, just return success (actually temporary use)
@@ -817,9 +921,8 @@ async def save_user_env_vars(env_vars: dict, session: Session = Depends(require_
     try:
         env_service = EnvService(env_path)
         
-        for key, value in env_vars.items():
-            if value:  # Only save non-empty values
-                env_service.update_env_var(key, value)
+        for key, value in filtered_env_vars.items():
+            env_service.update_env_var(key, value)
         
         # 重新加载 .env 文件确保所有变量都是最新的
         load_dotenv(env_path, override=True)

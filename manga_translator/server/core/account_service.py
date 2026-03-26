@@ -71,6 +71,10 @@ class AccountService:
             if role == 'admin':
                 permissions = UserPermissions(
                     allowed_translators=["*"],
+                    allowed_ocr=["*"],
+                    allowed_colorizers=["*"],
+                    allowed_renderers=["*"],
+                    allowed_workflows=["*"],
                     allowed_parameters=["*"],
                     max_concurrent_tasks=10,
                     daily_quota=-1,
@@ -84,6 +88,14 @@ class AccountService:
                 permissions = UserPermissions(
                     allowed_translators=[],  # 空=继承用户组
                     denied_translators=[],
+                    allowed_ocr=[],          # 空=继承用户组
+                    denied_ocr=[],
+                    allowed_colorizers=[],   # 空=继承用户组
+                    denied_colorizers=[],
+                    allowed_renderers=[],    # 空=继承用户组
+                    denied_renderers=[],
+                    allowed_workflows=[],    # 空=继承用户组
+                    denied_workflows=[],
                     allowed_parameters=[],   # 空=继承用户组
                     denied_parameters=[],
                     max_concurrent_tasks=2,
@@ -294,6 +306,10 @@ class AccountService:
                 role='admin',
                 permissions=UserPermissions(
                     allowed_translators=["*"],
+                    allowed_ocr=["*"],
+                    allowed_colorizers=["*"],
+                    allowed_renderers=["*"],
+                    allowed_workflows=["*"],
                     allowed_parameters=["*"],
                     max_concurrent_tasks=10,
                     daily_quota=-1,

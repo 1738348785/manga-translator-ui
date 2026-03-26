@@ -16,6 +16,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from manga_translator.server_paths import (
+    SERVER_DATA_RELATIVE_DIR,
+    USER_RESOURCES_RELATIVE_DIR,
+    ensure_server_data_layout,
+)
 
 # Import core modules
 from manga_translator.server.core import config_manager, logging_manager, task_manager
@@ -23,6 +28,31 @@ from manga_translator.server.instance import ExecutorInstance, executor_instance
 
 # 初始化服务器配置文件（如果不存在则从模板复制）
 config_manager.init_server_config_file()
+ensure_server_data_layout()
+
+
+def _ensure_web_startup_files() -> None:
+    """Create the same template files that the Qt app prepares on startup."""
+    from manga_translator.colorization.prompt_loader import ensure_ai_colorizer_prompt_file
+    from manga_translator.custom_api_params import ensure_custom_api_params_file
+    from manga_translator.ocr.prompt_loader import ensure_ai_ocr_prompt_file
+    from manga_translator.rendering.prompt_loader import ensure_ai_renderer_prompt_file
+    from manga_translator.utils.text_filter import ensure_filter_list_exists
+
+    startup_files = [
+        ("custom_api_params", lambda: ensure_custom_api_params_file(logger=logger)),
+        ("ocr_prompt", ensure_ai_ocr_prompt_file),
+        ("renderer_prompt", ensure_ai_renderer_prompt_file),
+        ("colorizer_prompt", ensure_ai_colorizer_prompt_file),
+        ("filter_list", ensure_filter_list_exists),
+    ]
+
+    for label, factory in startup_files:
+        try:
+            path = factory()
+            logger.info(f"Startup file ready [{label}]: {path}")
+        except Exception as exc:
+            logger.warning(f"Failed to prepare startup file [{label}]: {exc}")
 
 # Import route modules
 # Import sessions_router
@@ -103,6 +133,7 @@ async def startup_event():
     # 添加启动日志
     add_log("服务器正在启动...", "INFO")
     logger.info("Server starting up...")
+    _ensure_web_startup_files()
     from manga_translator.server.core.permission_integration import (
         IntegratedPermissionService,
     )
@@ -118,7 +149,7 @@ async def startup_event():
     )
     
     # Initialize services - 所有数据文件统一放在 manga_translator/server/data 目录
-    DATA_DIR = "manga_translator/server/data"
+    DATA_DIR = SERVER_DATA_RELATIVE_DIR
     _account_service = AccountService(accounts_file=f"{DATA_DIR}/accounts.json")
     _session_service = SessionService(
         sessions_file=f"{DATA_DIR}/sessions.json",
@@ -138,8 +169,8 @@ async def startup_event():
     init_translation_auth(_audit_service)
     
     # Initialize resource management services
-    prompts_repo = ResourceRepository("manga_translator/server/user_resources/prompts/index.json")
-    fonts_repo = ResourceRepository("manga_translator/server/user_resources/fonts/index.json")
+    prompts_repo = ResourceRepository(f"{USER_RESOURCES_RELATIVE_DIR}/prompts/index.json")
+    fonts_repo = ResourceRepository(f"{USER_RESOURCES_RELATIVE_DIR}/fonts/index.json")
     resource_service = ResourceManagementService(prompts_repo, fonts_repo)
     
     # Initialize enhanced permission service for resource routes
