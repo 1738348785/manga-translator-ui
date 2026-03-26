@@ -979,22 +979,29 @@ class MangaTranslator:
         if not image_name:
             return
 
+        has_regions = hasattr(ctx, 'text_regions') and ctx.text_regions is not None
+        has_non_empty_regions = has_regions and bool(ctx.text_regions)
+
         # 导入 YOLO 框的导出模式不保存蒙版
         if getattr(ctx, 'used_imported_yolo_labels', False):
             logger.info("Import YOLO labels enabled in generate_and_export mode: skipping mask refinement and mask save")
             ctx.mask = None
             ctx.mask_raw = None
         # 导出翻译模式：强制执行蒙版优化（跳过修复）
-        elif ctx.mask is None and ctx.mask_raw is not None:
+        elif has_non_empty_regions and ctx.mask is None and ctx.mask_raw is not None:
             await self._report_progress('mask-generation')
             try:
                 ctx.mask = await self._run_mask_refinement(config, ctx)
             except Exception:
                 logger.error(f"Error during mask-generation in generate_and_export mode:\n{traceback.format_exc()}")
                 ctx.mask = ctx.mask_raw  # 回退到原始蒙版
+        elif not has_non_empty_regions and ctx.mask_raw is not None:
+            logger.info(
+                f"Generate-and-export mode: no text regions for {os.path.basename(image_name)}, "
+                "skipping mask refinement and exporting empty JSON/TXT only"
+            )
 
-        has_regions = hasattr(ctx, 'text_regions') and ctx.text_regions is not None
-        should_export = has_regions and (bool(ctx.text_regions) or ensure_json_with_empty_regions)
+        should_export = has_regions and (has_non_empty_regions or ensure_json_with_empty_regions)
         if not should_export:
             return
 
@@ -1034,22 +1041,29 @@ class MangaTranslator:
         if not image_name:
             return
 
+        has_regions = hasattr(ctx, 'text_regions') and ctx.text_regions is not None
+        has_non_empty_regions = has_regions and bool(ctx.text_regions)
+
         # 导入 YOLO 框的导出模式不保存蒙版
         if getattr(ctx, 'used_imported_yolo_labels', False):
             logger.info("Import YOLO labels enabled in template mode: skipping mask refinement and mask save")
             ctx.mask = None
             ctx.mask_raw = None
         # 导出原文模式：强制执行蒙版优化（跳过修复）
-        elif ctx.mask is None and ctx.mask_raw is not None:
+        elif has_non_empty_regions and ctx.mask is None and ctx.mask_raw is not None:
             await self._report_progress('mask-generation')
             try:
                 ctx.mask = await self._run_mask_refinement(config, ctx)
             except Exception:
                 logger.error(f"Error during mask-generation in template mode:\n{traceback.format_exc()}")
                 ctx.mask = ctx.mask_raw  # 回退到原始蒙版
+        elif not has_non_empty_regions and ctx.mask_raw is not None:
+            logger.info(
+                f"Template mode: no text regions for {os.path.basename(image_name)}, "
+                "skipping mask refinement and exporting empty JSON/TXT only"
+            )
 
-        has_regions = hasattr(ctx, 'text_regions') and ctx.text_regions is not None
-        should_export = has_regions and (bool(ctx.text_regions) or ensure_json_with_empty_regions)
+        should_export = has_regions and (has_non_empty_regions or ensure_json_with_empty_regions)
         if not should_export:
             return
 
@@ -3897,12 +3911,70 @@ class MangaTranslator:
 
                                 setattr(ctx, mask_attr, mask_arr)
                             
-                            # 如果没有文本区域，跳过mask refinement、inpainting和rendering，直接返回原图
+                            # load_text 支持“仅修复”模式：即使没有文字区域，只要 JSON 里有可用蒙版，也执行修复。
                             if not ctx.text_regions:
-                                logger.info(f"No text regions to render for {os.path.basename(image_name)}, returning original image")
-                                await self._report_progress('finished', True)
-                                ctx.result = ctx.upscaled  # 返回上采样后的原图
-                                ctx = await self._revert_upscale(config, ctx)
+                                mask_for_inpainting = ctx.mask if ctx.mask is not None else ctx.mask_raw
+                                has_mask_for_inpainting = False
+                                if mask_for_inpainting is not None:
+                                    try:
+                                        has_mask_for_inpainting = np.count_nonzero(mask_for_inpainting) > 0
+                                    except Exception as mask_count_err:
+                                        logger.warning(
+                                            f"Load text mode: failed to inspect imported mask for {os.path.basename(image_name)} "
+                                            f"({mask_count_err}), falling back to original image"
+                                        )
+
+                                if has_mask_for_inpainting:
+                                    logger.info(
+                                        f"No text regions found in JSON for {os.path.basename(image_name)}, "
+                                        "using imported mask for inpaint-only output"
+                                    )
+                                    mask_injected_from_raw = ctx.mask is None
+                                    if ctx.mask is None:
+                                        ctx.mask = np.asarray(mask_for_inpainting, dtype=np.uint8)
+
+                                    generated_inpainted_in_load_text = False
+                                    if existing_inpainted_path and loaded_mask is not None:
+                                        try:
+                                            existing_inpainted_image = open_pil_image(existing_inpainted_path, eager=False)
+                                            existing_inpainted_rgb, _ = load_image(existing_inpainted_image)
+                                            ctx.img_inpainted = existing_inpainted_rgb
+                                            logger.info("Load text mode: Using existing inpainted image for mask-only import.")
+                                        except Exception as existing_inpaint_err:
+                                            logger.warning(
+                                                f"Load text mode: failed to load existing inpainted image for mask-only import, "
+                                                f"rerunning inpainting ({existing_inpaint_err})"
+                                            )
+                                            await self._report_progress('inpainting')
+                                            ctx.img_inpainted = await self._run_inpainting(config, ctx)
+                                            generated_inpainted_in_load_text = True
+                                    else:
+                                        await self._report_progress('inpainting')
+                                        ctx.img_inpainted = await self._run_inpainting(config, ctx)
+                                        generated_inpainted_in_load_text = True
+
+                                    if (
+                                        generated_inpainted_in_load_text
+                                        and image_name
+                                        and ctx.img_inpainted is not None
+                                        and self.save_text
+                                    ):
+                                        self._save_inpainted_image(image_name, ctx.img_inpainted)
+
+                                    if mask_injected_from_raw:
+                                        ctx.mask = None
+
+                                    await self._report_progress('finished', True)
+                                    ctx.result = dump_image(ctx.input, ctx.img_inpainted, ctx.img_alpha)
+                                    ctx = await self._revert_upscale(config, ctx)
+                                else:
+                                    logger.info(
+                                        f"No text regions or usable mask found in JSON for {os.path.basename(image_name)}, "
+                                        "returning original image"
+                                    )
+                                    await self._report_progress('finished', True)
+                                    ctx.result = ctx.upscaled  # 返回上采样后的原图
+                                    ctx = await self._revert_upscale(config, ctx)
                             else:
                                 # Mask refinement
                                 if ctx.mask is None:
