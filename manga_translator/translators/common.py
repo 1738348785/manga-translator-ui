@@ -2308,8 +2308,14 @@ class CommonTranslator(InfererModule):
         """
         if not full_text:
             return
+
+        # 剥离 <think>...</think> 标签内容，避免思考过程中的翻译与实际翻译交叉匹配
+        clean_text = re.sub(r'<think>.*?</think>', '', full_text, flags=re.DOTALL)
+        # 处理未闭合的 <think> 标签（流式传输中可能还没到 </think>）
+        clean_text = re.sub(r'<think>.*$', '', clean_text, flags=re.DOTALL)
+
         pattern = r'"id"\s*:\s*(\d+)\s*,\s*"translation"\s*:\s*"((?:\\.|[^"\\])*)"'
-        for m in re.finditer(pattern, full_text, flags=re.DOTALL):
+        for m in re.finditer(pattern, clean_text, flags=re.DOTALL):
             try:
                 tid = int(m.group(1))
             except Exception:
@@ -2319,9 +2325,9 @@ class CommonTranslator(InfererModule):
                 decoded_text = json.loads(f'"{raw_text}"')
             except Exception:
                 decoded_text = raw_text.replace('\\"', '"').replace("\\n", "\n")
-            if self._stream_json_seen.get(tid) == decoded_text:
+            if decoded_text in self._stream_json_seen.get(tid, set()):
                 continue
-            self._stream_json_seen[tid] = decoded_text
+            self._stream_json_seen.setdefault(tid, set()).add(decoded_text)
             if not self._stream_result_header_printed:
                 self.logger.info("--- Translation Results ---")
                 self._stream_result_header_printed = True
@@ -2333,7 +2339,7 @@ class CommonTranslator(InfererModule):
 
         term_pattern = r'"original"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"translation"\s*:\s*"((?:\\.|[^"\\])*)"(?:\s*,\s*"category"\s*:\s*"((?:\\.|[^"\\])*)")?'
         stream_terms: List[Dict[str, str]] = []
-        for tm in re.finditer(term_pattern, full_text, flags=re.DOTALL):
+        for tm in re.finditer(term_pattern, clean_text, flags=re.DOTALL):
             raw_o, raw_t, raw_c = tm.group(1), tm.group(2), tm.group(3) or ""
             try:
                 term_o = json.loads(f'"{raw_o}"')
