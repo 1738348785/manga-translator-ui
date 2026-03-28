@@ -3,7 +3,7 @@ import os
 import shutil
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFontDatabase
+from PyQt6.QtGui import QBrush, QColor, QFontDatabase
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QFileDialog,
@@ -37,6 +37,7 @@ _SETTINGS_TAB_LAYOUT_FILE = os.path.join(
 
 _PROMPT_EXTENSIONS = (".yaml", ".yml", ".json")
 _FONT_EXTENSIONS = (".ttf", ".otf", ".ttc")
+_CURRENT_ASSET_PREFIX = "✓ "
 
 
 def _load_reclassify_settings_layout():
@@ -72,6 +73,50 @@ def _set_prompt_status(self, translation_key: str, **kwargs):
 def _set_font_status(self, translation_key: str, **kwargs):
     if hasattr(self, "font_status_label"):
         self.font_status_label.setText(self._t(translation_key, **kwargs))
+
+
+def _normalize_asset_filename(path_or_name: str | None) -> str:
+    if not path_or_name:
+        return ""
+    return os.path.basename(str(path_or_name).replace("\\", "/").rstrip("/"))
+
+
+def _get_asset_item_filename(item: QListWidgetItem | None) -> str:
+    if not item:
+        return ""
+    raw_value = item.data(Qt.ItemDataRole.UserRole)
+    if isinstance(raw_value, str) and raw_value.strip():
+        return raw_value.strip()
+    text = item.text().strip()
+    if text.startswith(_CURRENT_ASSET_PREFIX):
+        return text[len(_CURRENT_ASSET_PREFIX):].strip()
+    return text
+
+
+def _find_asset_item(list_widget: QListWidget, filename: str) -> QListWidgetItem | None:
+    if not filename:
+        return None
+    for index in range(list_widget.count()):
+        item = list_widget.item(index)
+        if _get_asset_item_filename(item) == filename:
+            return item
+    return None
+
+
+def _create_asset_list_item(self, filename: str, *, is_current: bool, tooltip_text: str | None = None) -> QListWidgetItem:
+    item = QListWidgetItem(filename)
+    item.setData(Qt.ItemDataRole.UserRole, filename)
+    if is_current:
+        item.setText(f"{_CURRENT_ASSET_PREFIX}{filename}")
+        font = item.font()
+        font.setBold(True)
+        item.setFont(font)
+        success_color = get_current_theme_colors().get("success_color")
+        if success_color:
+            item.setForeground(QBrush(QColor(success_color)))
+        if tooltip_text:
+            item.setToolTip(tooltip_text)
+    return item
 
 
 def _sanitize_file_stem(name: str) -> str:
@@ -962,21 +1007,27 @@ def refresh_prompt_manager(self):
         return
     prompt_files = self.controller.get_hq_prompt_options()
     selected_prompt_path = self.config_service.get_config().translator.high_quality_prompt_path
-    selected_filename = os.path.basename(selected_prompt_path) if selected_prompt_path else ""
+    selected_filename = _normalize_asset_filename(selected_prompt_path)
     current_item = self.prompt_list_widget.currentItem()
-    current_filename = current_item.text().strip() if current_item else ""
+    current_filename = _get_asset_item_filename(current_item)
     preferred_filename = current_filename or selected_filename
 
     self.prompt_list_widget.blockSignals(True)
     self.prompt_list_widget.clear()
     for prompt in prompt_files:
-        self.prompt_list_widget.addItem(QListWidgetItem(prompt))
+        item = _create_asset_list_item(
+            self,
+            prompt,
+            is_current=(prompt == selected_filename),
+            tooltip_text=self._t("Current prompt: {filename}", filename=prompt),
+        )
+        self.prompt_list_widget.addItem(item)
     self.prompt_list_widget.blockSignals(False)
 
     if preferred_filename:
-        matching_items = self.prompt_list_widget.findItems(preferred_filename, Qt.MatchFlag.MatchExactly)
-        if matching_items:
-            self.prompt_list_widget.setCurrentItem(matching_items[0])
+        matching_item = _find_asset_item(self.prompt_list_widget, preferred_filename)
+        if matching_item:
+            self.prompt_list_widget.setCurrentItem(matching_item)
     else:
         self.prompt_list_widget.clearSelection()
 
@@ -989,11 +1040,12 @@ def apply_selected_prompt(self):
     current_item = self.prompt_list_widget.currentItem() if hasattr(self, "prompt_list_widget") else None
     if not current_item:
         return
-    filename = current_item.text().strip()
+    filename = _get_asset_item_filename(current_item)
     if not filename:
         return
     selected_path = os.path.join("dict", filename).replace("\\", "/")
     self.setting_changed.emit("translator.high_quality_prompt_path", selected_path)
+    self._refresh_prompt_manager()
     _set_prompt_status(self, "Current prompt: {filename}", filename=filename)
 
 
@@ -1004,7 +1056,7 @@ def on_prompt_selection_changed(self, current, previous):
     if not current:
         self.prompt_preview_panel.clear()
         return
-    filename = current.text().strip()
+    filename = _get_asset_item_filename(current)
     if not filename:
         self.prompt_preview_panel.clear()
         return
@@ -1036,16 +1088,16 @@ def _get_selected_prompt_filename(self) -> str | None:
     current = self.prompt_list_widget.currentItem() if hasattr(self, "prompt_list_widget") else None
     if not current:
         return None
-    filename = current.text().strip()
+    filename = _get_asset_item_filename(current)
     return filename or None
 
 
 def _select_prompt_item(self, filename: str):
     if not filename or not hasattr(self, "prompt_list_widget"):
         return
-    items = self.prompt_list_widget.findItems(filename, Qt.MatchFlag.MatchExactly)
-    if items:
-        self.prompt_list_widget.setCurrentItem(items[0])
+    item = _find_asset_item(self.prompt_list_widget, filename)
+    if item:
+        self.prompt_list_widget.setCurrentItem(item)
 
 
 def _prompt_file_path(filename: str) -> str:
@@ -1262,16 +1314,16 @@ def _get_selected_font_filename(self) -> str | None:
     current = self.font_list_widget.currentItem() if hasattr(self, "font_list_widget") else None
     if not current:
         return None
-    filename = current.text().strip()
+    filename = _get_asset_item_filename(current)
     return filename or None
 
 
 def _select_font_item(self, filename: str):
     if not filename or not hasattr(self, "font_list_widget"):
         return
-    items = self.font_list_widget.findItems(filename, Qt.MatchFlag.MatchExactly)
-    if items:
-        self.font_list_widget.setCurrentItem(items[0])
+    item = _find_asset_item(self.font_list_widget, filename)
+    if item:
+        self.font_list_widget.setCurrentItem(item)
 
 
 def import_fonts(self):
@@ -1357,7 +1409,7 @@ def delete_selected_font(self):
         QMessageBox.critical(self, self._t("Error"), str(e))
         return
 
-    current_font = self.config_service.get_config().render.font_path or ""
+    current_font = _normalize_asset_filename(self.config_service.get_config().render.font_path)
     if current_font == filename:
         self.setting_changed.emit("render.font_path", None)
 
@@ -1379,20 +1431,26 @@ def refresh_font_manager(self):
     except Exception as e:
         print(f"Error scanning fonts directory: {e}")
 
-    selected_font = self.config_service.get_config().render.font_path or ""
+    selected_font = _normalize_asset_filename(self.config_service.get_config().render.font_path)
     current_item = self.font_list_widget.currentItem()
-    current_font = current_item.text().strip() if current_item else ""
+    current_font = _get_asset_item_filename(current_item)
     preferred_font = current_font or selected_font
     self.font_list_widget.blockSignals(True)
     self.font_list_widget.clear()
     for font_name in font_files:
-        self.font_list_widget.addItem(QListWidgetItem(font_name))
+        item = _create_asset_list_item(
+            self,
+            font_name,
+            is_current=(font_name == selected_font),
+            tooltip_text=self._t("Current font: {filename}", filename=font_name),
+        )
+        self.font_list_widget.addItem(item)
     self.font_list_widget.blockSignals(False)
 
     if preferred_font:
-        matching_items = self.font_list_widget.findItems(preferred_font, Qt.MatchFlag.MatchExactly)
-        if matching_items:
-            self.font_list_widget.setCurrentItem(matching_items[0])
+        matching_item = _find_asset_item(self.font_list_widget, preferred_font)
+        if matching_item:
+            self.font_list_widget.setCurrentItem(matching_item)
     else:
         self.font_list_widget.clearSelection()
 
@@ -1405,10 +1463,11 @@ def apply_selected_font(self):
     current_item = self.font_list_widget.currentItem() if hasattr(self, "font_list_widget") else None
     if not current_item:
         return
-    font_name = current_item.text().strip()
+    font_name = _get_asset_item_filename(current_item)
     if not font_name:
         return
     self.setting_changed.emit("render.font_path", font_name)
+    self._refresh_font_manager()
     _set_font_status(self, "Current font: {filename}", filename=font_name)
 
 
@@ -1425,7 +1484,7 @@ def _on_font_selection_changed(self, current, previous):
             lbl.setStyleSheet(_font_preview_style(size))
         return
 
-    font_filename = current.text().strip()
+    font_filename = _get_asset_item_filename(current)
     if not font_filename:
         return
 
