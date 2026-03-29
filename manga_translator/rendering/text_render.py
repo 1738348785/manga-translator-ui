@@ -1,25 +1,32 @@
 import logging
+import math
 import os
 import re
 import threading
-from pathlib import Path
+from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
 import cv2
-import freetype
 import numpy as np
 from hyphen import Hyphenator
 from hyphen.dictools import LANGUAGES as HYPHENATOR_LANGUAGES
 from langcodes import standardize_tag
+from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtGui import (
+    QColor,
+    QFont,
+    QFontDatabase,
+    QFontMetricsF,
+    QGuiApplication,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPainterPathStroker,
+    QRawFont,
+    QTextLayout,
+)
 
-try:
-    import uharfbuzz as hb
-    HAS_UHARFBUZZ = True
-except ImportError:
-    hb = None
-    HAS_UHARFBUZZ = False
-
-from ..utils import BASE_PATH, imwrite_unicode
+from ..utils import BASE_PATH
 
 try:
     HYPHENATOR_LANGUAGES.remove('fr')
@@ -123,7 +130,26 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())  
 
 DEFAULT_FONT = os.path.join(BASE_PATH, 'fonts', 'Arial-Unicode-Regular.ttf')
-FONT = None
+_HORIZONTAL_SYMBOL_HALFWIDTH_MAP = str.maketrans({
+    '！': '!',
+    '？': '?',
+})
+_VERTICAL_OPEN_BRACKETS = {
+    '「', '『', '（', '《', '〈', '【', '〔', '［', '｛', '(', '“', '‘',
+    '﹁', '﹃', '︵', '︷', '︹', '︻', '︽', '︿', '﹇',
+}
+_VERTICAL_CLOSE_BRACKETS = {
+    '」', '』', '）', '》', '〉', '】', '〕', '］', '｝', ')', '”', '’',
+    '﹂', '﹄', '︶', '︸', '︺', '︼', '︾', '﹀', '﹈',
+}
+_VERTICAL_PUNCT_UP = {
+    '。', '．', '，', '、', '·', '：', '；', '！', '？',
+    '︒', '︐', '︑', '︓', '︔', '︕', '︖', '﹅', '﹆',
+}
+_VERTICAL_PUNCT_TOP_RIGHT = {
+    '。', '，', '、', '︒', '︐', '︑', '﹅',
+}
+_VERTICAL_COMPACT_SLOT = _VERTICAL_OPEN_BRACKETS | _VERTICAL_CLOSE_BRACKETS | _VERTICAL_PUNCT_UP
 
 def CJK_Compatibility_Forms_translate(cdpt: str, direction: int):
     """direction: 0 - horizontal, 1 - vertical"""
@@ -158,65 +184,6 @@ def compact_special_symbols(text: str) -> str:
     pattern = r'([。，、！？；：…—～「」『』【】（）《》〈〉.,!?;:\-])[ 　]+'
     text = re.sub(pattern, r'\1', text)
     return text
-
-def should_force_wrap_for_mismatched_direction(config, logger) -> bool:
-    """
-    检测是否应该强制打开换行：
-    如果自动算法检测到是竖排（检测框宽高比 < 1）但被强制设置成横排，返回 True
-    如果自动算法检测到是横排（检测框宽高比 >= 1）但被强制设置成竖排，返回 True
-    
-    Args:
-        config: 配置对象，需要包含 _current_region 属性
-        logger: 日志对象
-    
-    Returns:
-        bool: 是否应该强制打开换行
-    """
-    if not config or not hasattr(config, '_current_region'):
-        return False
-    
-    region = config._current_region
-    
-    # 检查是否被强制设置了方向
-    if not hasattr(region, '_direction') or region._direction not in ['h', 'horizontal', 'v', 'vertical']:
-        return False
-    
-    forced_horizontal = region._direction in ['h', 'horizontal']
-    
-    # 检查自动检测的方向
-    if not hasattr(region, 'lines') or len(region.lines) == 0:
-        return False
-    
-    # 计算面积最大的检测框的宽高比
-    max_area = 0
-    largest_box_aspect_ratio = 1
-    
-    try:
-        from shapely.geometry import Polygon
-        for line in region.lines:
-            line_polygon = Polygon(line)
-            area = line_polygon.area
-            if area > max_area:
-                max_area = area
-                x_coords = line[:, 0]
-                y_coords = line[:, 1]
-                line_width = np.max(x_coords) - np.min(x_coords)
-                line_height = np.max(y_coords) - np.min(y_coords)
-                largest_box_aspect_ratio = line_width / line_height if line_height > 0 else 1
-    except Exception as e:
-        logger.warning(f"检测方向不匹配时出错: {e}")
-        return False
-    
-    auto_detected_horizontal = largest_box_aspect_ratio >= 1
-    
-    # 如果强制方向与自动检测方向不一致，返回 True
-    if forced_horizontal != auto_detected_horizontal:
-        direction_name = "横排" if forced_horizontal else "竖排"
-        auto_direction_name = "横排" if auto_detected_horizontal else "竖排"
-        logger.debug(f"[方向不匹配] 自动检测为{auto_direction_name}(宽高比={largest_box_aspect_ratio:.2f})但被强制设置为{direction_name}，打开换行")
-        return True
-    
-    return False
 
 def auto_add_horizontal_tags(text: str) -> str:
     """自动为竖排文本中的短英文单词或连续符号添加<H>标签，使其横向显示。
@@ -340,6 +307,8 @@ def _normalize_horizontal_block_content(content: str) -> str:
         return ""
     content = re.sub(r'\s*(\[BR\]|<br\s*/?>|【BR】)\s*', '', content, flags=re.IGNORECASE)
     content = content.replace('\r', '').replace('\n', '')
+    if re.fullmatch(r'[!?！？]+', content):
+        content = content.translate(_HORIZONTAL_SYMBOL_HALFWIDTH_MAP)
     return content
 
 
@@ -399,21 +368,6 @@ def should_rotate_horizontal_block_90(content: str) -> bool:
         content,
     )
     return bool(latin_phrase)
-    
-def rotate_image(image, angle):
-    if angle == 0:
-        return image, (0, 0)
-    image_exp = np.zeros((round(image.shape[0] * 1.5), round(image.shape[1] * 1.5), image.shape[2]), dtype = np.uint8)
-    diff_i = (image_exp.shape[0] - image.shape[0]) // 2
-    diff_j = (image_exp.shape[1] - image.shape[1]) // 2
-    image_exp[diff_i:diff_i+image.shape[0], diff_j:diff_j+image.shape[1]] = image
-    # from https://stackoverflow.com/questions/9041681/opencv-python-rotate-image-by-x-degrees-around-specific-point
-    image_center = tuple(np.array(image_exp.shape[1::-1]) / 2)
-    rot_mat = cv2.getRotationMatrix2D(image_center, angle, 1.0)
-    result = cv2.warpAffine(image_exp, rot_mat, image_exp.shape[1::-1], flags=cv2.INTER_LINEAR)
-    if angle == 90:
-        return result, (0, 0)
-    return result, (diff_i, diff_j)
 
 def add_color(bw_char_map, color, stroke_char_map, stroke_color):
     if bw_char_map.size == 0:
@@ -455,12 +409,31 @@ FALLBACK_FONTS = [
     os.path.join(BASE_PATH, 'fonts/msyh.ttc'),
     os.path.join(BASE_PATH, 'fonts/msgothic.ttc'),
 ]
-_font_data_cache = {}
 _thread_font_state = threading.local()
+_qt_runtime_lock = threading.Lock()
+_qt_runtime_app = None
+_QT_FONT_PROBE_SIZE = 32.0
+_font_family_cache = {}
 
 
 def _normalize_font_path(path: str) -> str:
     return path.replace('\\', '/')
+
+
+def _ensure_qt_runtime():
+    global _qt_runtime_app
+
+    app = QGuiApplication.instance()
+    if app is not None:
+        return app
+
+    with _qt_runtime_lock:
+        app = QGuiApplication.instance()
+        if app is not None:
+            return app
+        os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+        _qt_runtime_app = QGuiApplication([])
+        return _qt_runtime_app
 
 
 def _new_font_state() -> dict:
@@ -468,13 +441,14 @@ def _new_font_state() -> dict:
         'font': None,
         'font_selection': [],
         'font_cache': {},
-        'font_file_handles': {},  # 保持句柄存活，避免 Face 指向已关闭文件
-        'face_paths': {},
+        'layout_font_cache': {},
         'glyph_cache': {},
+        'border_cache': {},
+        'measure_cache': {},
     }
 
 
-def _cache_glyph(state: dict, key: Tuple[str, int, int], glyph: "Glyph") -> "Glyph":
+def _cache_glyph(state: dict, key: Tuple, glyph: SimpleNamespace) -> SimpleNamespace:
     cache = state['glyph_cache']
     if len(cache) >= 4096:
         cache.clear()
@@ -486,6 +460,8 @@ def _clear_glyph_cache(state: Optional[dict] = None):
     if state is None:
         state = _get_thread_font_state()
     state['glyph_cache'].clear()
+    state['border_cache'].clear()
+    state['measure_cache'].clear()
 
 
 def _get_thread_font_state() -> dict:
@@ -502,16 +478,83 @@ def _get_thread_font_state() -> dict:
     return state
 
 
-def _load_font_for_state(state: dict, path: str) -> freetype.Face:
-    path = _normalize_font_path(path)
-    face = state['font_cache'].get(path)
-    if face is None:
-        file_handle = Path(path).open('rb')
-        face = freetype.Face(file_handle)
-        state['font_cache'][path] = face
-        state['font_file_handles'][path] = file_handle
-        state['face_paths'][id(face)] = path
-    return face
+def _resolve_existing_font_path(path: str) -> str:
+    if not path:
+        return ''
+
+    normalized_path = _normalize_font_path(path)
+    candidates = [normalized_path]
+    if not os.path.isabs(normalized_path):
+        candidates.extend(
+            [
+                _normalize_font_path(os.path.join(BASE_PATH, 'fonts', os.path.basename(normalized_path))),
+                _normalize_font_path(os.path.join(BASE_PATH, normalized_path)),
+            ]
+        )
+
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ''
+
+
+def _get_raw_font_for_state(state: dict, path: str, pixel_size: float) -> QRawFont:
+    _ensure_qt_runtime()
+    key = (_normalize_font_path(path), float(max(pixel_size, 1.0)))
+    raw_font = state['font_cache'].get(key)
+    if raw_font is None:
+        raw_font = QRawFont(key[0], key[1])
+        if not raw_font.isValid():
+            raise RuntimeError(f'Could not load Qt font: {key[0]}')
+        state['font_cache'][key] = raw_font
+    return raw_font
+
+
+def _get_qfont_family_for_path(path: str) -> str:
+    _ensure_qt_runtime()
+    normalized_path = _normalize_font_path(path)
+    family = _font_family_cache.get(normalized_path)
+    if family:
+        return family
+
+    font_id = QFontDatabase.addApplicationFont(normalized_path)
+    if font_id != -1:
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        if families:
+            family = families[0]
+
+    if not family:
+        raw_font = QRawFont(normalized_path, _QT_FONT_PROBE_SIZE)
+        if raw_font.isValid():
+            family = raw_font.familyName()
+
+    if not family:
+        raise RuntimeError(f'Could not resolve Qt font family: {path}')
+
+    _font_family_cache[normalized_path] = family
+    return family
+
+
+def _get_layout_font_for_state(state: dict, path: str, pixel_size: float) -> QFont:
+    cache = state.setdefault('layout_font_cache', {})
+    key = (_normalize_font_path(path), int(max(pixel_size, 1)))
+    qfont = cache.get(key)
+    if qfont is None:
+        family = _get_qfont_family_for_path(key[0])
+        qfont = QFont(family)
+        qfont.setPixelSize(key[1])
+        qfont.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+        qfont.setStyleStrategy(QFont.StyleStrategy.PreferOutline)
+        cache[key] = qfont
+    return QFont(qfont)
+
+
+def _load_font_for_state(state: dict, path: str) -> str:
+    resolved_path = _resolve_existing_font_path(path)
+    if not resolved_path:
+        raise RuntimeError(f'Could not resolve font path: {path}')
+    _get_raw_font_for_state(state, resolved_path, _QT_FONT_PROBE_SIZE)
+    return resolved_path
 
 
 def _refresh_font_selection(state: Optional[dict] = None):
@@ -522,17 +565,19 @@ def _refresh_font_selection(state: Optional[dict] = None):
         font_selection.append(state['font'])
     for font_path in FALLBACK_FONTS:
         try:
-            face = _load_font_for_state(state, font_path)
-            if face not in font_selection:
-                font_selection.append(face)
+            resolved_path = _load_font_for_state(state, font_path)
+            if resolved_path not in font_selection:
+                font_selection.append(resolved_path)
         except Exception as e:
             logger.error(f"Failed to load fallback font: {font_path} - {e}")
     state['font_selection'] = font_selection
     return font_selection
 
-def get_cached_font(path: str) -> freetype.Face:
+
+def get_cached_font(path: str) -> str:
     state = _get_thread_font_state()
     return _load_font_for_state(state, path)
+
 
 def update_font_selection():
     return _refresh_font_selection()
@@ -540,36 +585,11 @@ def update_font_selection():
 
 def set_font(path: str):
     state = _get_thread_font_state()
-
-    # 处理相对路径：尝试在 BASE_PATH 下查找
-    resolved_path = path
-    if path and not os.path.isabs(path) and not os.path.exists(path):
-        # 尝试 BASE_PATH/fonts/filename 或 BASE_PATH/path
-        possible_paths = [
-            os.path.join(BASE_PATH, 'fonts', os.path.basename(path)),
-            os.path.join(BASE_PATH, path),
-        ]
-        for p in possible_paths:
-            if os.path.exists(p):
-                resolved_path = p
-                break
-    
-    if not resolved_path or not os.path.exists(resolved_path):
+    try:
+        state['font'] = get_cached_font(path)
+    except Exception:
         if path:
             logger.error(f'Could not load font: {path}')
-        try:
-            state['font'] = get_cached_font(DEFAULT_FONT)
-        except Exception:
-            logger.critical("Default font could not be loaded. Please check your installation.")
-            state['font'] = None
-        _refresh_font_selection(state)
-        _clear_glyph_cache(state)
-        return
-
-    try:
-        state['font'] = get_cached_font(resolved_path)
-    except Exception:
-        logger.error(f'Could not load font: {resolved_path}')
         try:
             state['font'] = get_cached_font(DEFAULT_FONT)
         except Exception:
@@ -578,128 +598,161 @@ def set_font(path: str):
     _refresh_font_selection(state)
     _clear_glyph_cache(state)
 
-def is_thai_lang(lang: str):
-    lang = (lang or '').lower()
-    return lang in ['tha', 'th', 'th_th']
+def _resolve_stroke_ratio(config=None, stroke_width: Optional[float] = None) -> float:
+    if stroke_width is not None:
+        return float(stroke_width)
+    render_config = getattr(config, 'render', None)
+    return float(getattr(render_config, 'stroke_width', 0.07))
 
-def contains_thai_text(text: str) -> bool:
-    return any('\u0E00' <= ch <= '\u0E7F' for ch in text)
 
-def _get_face_path(face: freetype.Face) -> Optional[str]:
+def _qimage_alpha_to_array(image: QImage) -> np.ndarray:
+    ptr = image.bits()
+    ptr.setsize(image.sizeInBytes())
+    arr = np.frombuffer(ptr, dtype=np.uint8).reshape((image.height(), image.bytesPerLine() // 4, 4))
+    return arr[:, :image.width(), 3].copy()
+
+
+def _rasterize_path_to_alpha(path) -> Tuple[np.ndarray, int, int]:
+    if path.isEmpty():
+        return np.zeros((0, 0), dtype=np.uint8), 0, 0
+
+    rect = path.boundingRect()
+    left = math.floor(rect.left())
+    top = math.floor(rect.top())
+    width = max(0, math.ceil(rect.right()) - left)
+    height = max(0, math.ceil(rect.bottom()) - top)
+    if width <= 0 or height <= 0:
+        return np.zeros((0, 0), dtype=np.uint8), left, top
+
+    image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)
+
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(255, 255, 255, 255))
+    painter.translate(-left, -top)
+    painter.drawPath(path)
+    painter.end()
+
+    return _qimage_alpha_to_array(image), left, top
+
+
+def _bitmap_from_alpha(alpha: np.ndarray) -> SimpleNamespace:
+    return SimpleNamespace(
+        rows=int(alpha.shape[0]),
+        width=int(alpha.shape[1]),
+        buffer=alpha.reshape(-1).copy(),
+    )
+
+
+def _create_stroke_path(path: QPainterPath, stroke_px: int) -> QPainterPath:
+    if path.isEmpty() or stroke_px <= 0:
+        return QPainterPath()
+    stroker = QPainterPathStroker()
+    stroker.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    stroker.setCapStyle(Qt.PenCapStyle.RoundCap)
+    stroker.setWidth(float(stroke_px) * 2.0)
+    return stroker.createStroke(path).subtracted(path)
+
+
+def _make_glyph_slot(
+    alpha: np.ndarray,
+    *,
+    advance_x: int,
+    advance_y: int,
+    bitmap_left: int,
+    bitmap_top: int,
+    metrics_width: int,
+    metrics_height: int,
+    vert_bearing_y: int,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        bitmap=_bitmap_from_alpha(alpha),
+        advance=SimpleNamespace(
+            x=int(advance_x) << 6,
+            y=int(advance_y) << 6,
+        ),
+        bitmap_left=int(bitmap_left),
+        bitmap_top=int(bitmap_top),
+        metrics=SimpleNamespace(
+            vertBearingX=0,
+            vertBearingY=int(vert_bearing_y) << 6,
+            horiBearingX=int(bitmap_left) << 6,
+            horiBearingY=int(bitmap_top) << 6,
+            horiAdvance=int(advance_x) << 6,
+            vertAdvance=int(advance_y) << 6,
+            width=int(metrics_width) << 6,
+            height=int(metrics_height) << 6,
+        ),
+    )
+
+
+def _build_glyph_from_path(font_path: str, glyph_id: int, font_size: int):
     state = _get_thread_font_state()
-    return state['face_paths'].get(id(face))
+    cache_key = ('glyph-id', font_path, int(glyph_id), int(font_size))
+    cached = state['glyph_cache'].get(cache_key)
+    if cached is not None:
+        return cached
 
-def _get_font_data(path: str) -> bytes:
-    path = path.replace('\\', '/')
-    data = _font_data_cache.get(path)
-    if data is None:
-        data = Path(path).read_bytes()
-        _font_data_cache[path] = data
-    return data
+    raw_font = _get_raw_font_for_state(state, font_path, font_size)
+    path = raw_font.pathForGlyph(glyph_id)
+    alpha, left, top = _rasterize_path_to_alpha(path)
+    advances = raw_font.advancesForGlyphIndexes([glyph_id]) if glyph_id else []
+    advance_x = int(round(advances[0].x())) if advances else 0
+    rect = path.boundingRect()
+    metrics_width = max(alpha.shape[1], int(math.ceil(rect.width())))
+    metrics_height = max(alpha.shape[0], int(math.ceil(rect.height())))
+    if advance_x <= 0 and metrics_width > 0:
+        advance_x = metrics_width
+    advance_y = max(1, font_size)
+    if metrics_height > 0:
+        advance_y = max(advance_y, metrics_height)
 
-def _select_shaping_face(text: str) -> Optional[freetype.Face]:
+    glyph = _make_glyph_slot(
+        alpha,
+        advance_x=advance_x,
+        advance_y=advance_y,
+        bitmap_left=left,
+        bitmap_top=-top,
+        metrics_width=max(metrics_width, advance_x),
+        metrics_height=max(metrics_height, advance_y),
+        vert_bearing_y=top,
+    )
+    return _cache_glyph(state, cache_key, glyph)
+
+
+def _build_stroked_glyph_bitmap(font_path: str, glyph_id: int, font_size: int, stroke_ratio: float):
     state = _get_thread_font_state()
-    font_selection = state['font_selection']
-    primary_font = state['font']
-    visible_chars = [ch for ch in text if not ch.isspace()]
-    if not visible_chars:
-        return font_selection[0] if font_selection else primary_font
+    stroke_px = max(int(stroke_ratio * font_size), 1)
+    cache_key = ('stroke', font_path, int(glyph_id), int(font_size), stroke_px)
+    cached = state['border_cache'].get(cache_key)
+    if cached is not None:
+        return cached
 
-    best_face = None
-    best_score = -1
-    for face in font_selection:
-        score = sum(1 for ch in visible_chars if face.get_char_index(ch) != 0)
-        if score > best_score:
-            best_face = face
-            best_score = score
-        if score == len(visible_chars):
-            return face
-    return best_face
+    raw_font = _get_raw_font_for_state(state, font_path, font_size)
+    path = raw_font.pathForGlyph(glyph_id)
+    if path.isEmpty():
+        border = SimpleNamespace()
+        border.bitmap = _bitmap_from_alpha(np.zeros((0, 0), dtype=np.uint8))
+        border.left = 0
+        border.top = 0
+        state['border_cache'][cache_key] = border
+        return border
 
-def _select_face_for_char(ch: str) -> Optional[freetype.Face]:
-    state = _get_thread_font_state()
-    font_selection = state['font_selection']
-    primary_font = state['font']
-    if ch.isspace():
-        return font_selection[0] if font_selection else primary_font
+    stroke_path = _create_stroke_path(path, stroke_px)
+    alpha, left, top = _rasterize_path_to_alpha(stroke_path)
+    border = SimpleNamespace()
+    border.bitmap = _bitmap_from_alpha(alpha)
+    border.left = left
+    border.top = -top
+    state['border_cache'][cache_key] = border
+    return border
 
-    for face in font_selection:
-        if face.get_char_index(ch) != 0:
-            return face
-    return font_selection[0] if font_selection else primary_font
-
-def _split_text_into_shaping_runs(text: str):
-    if not text:
-        return []
-
-    runs = []
-    current_face = None
-    current_chars = []
-
-    for ch in text:
-        face = _select_face_for_char(ch)
-        if face is None:
-            continue
-
-        # Keep spaces with the active run so spacing stays consistent across mixed-font text.
-        if ch.isspace() and current_chars:
-            current_chars.append(ch)
-            continue
-
-        if current_face is None or face == current_face:
-            current_face = face
-            current_chars.append(ch)
-            continue
-
-        runs.append((current_face, ''.join(current_chars)))
-        current_face = face
-        current_chars = [ch]
-
-    if current_chars and current_face is not None:
-        runs.append((current_face, ''.join(current_chars)))
-
-    return runs
-
-def _shape_run_hb(face: freetype.Face, text: str, font_size: int):
-    if not HAS_UHARFBUZZ or not text:
-        return None, None, None
-
-    face_path = _get_face_path(face)
-    if not face_path:
-        return None, None, None
-
-    blob = hb.Blob(_get_font_data(face_path))
-    hb_face = hb.Face(blob, 0)
-    hb_font = hb.Font(hb_face)
-    hb.ot_font_set_funcs(hb_font)
-    hb_font.scale = (font_size * 64, font_size * 64)
-
-    buf = hb.Buffer()
-    buf.add_str(text)
-    buf.direction = 'ltr'
-    buf.script = 'thai'
-    buf.language = 'th'
-    buf.guess_segment_properties()
-    hb.shape(hb_font, buf, {'kern': True, 'liga': True, 'clig': True, 'ccmp': True, 'mark': True, 'mkmk': True})
-    return face, buf.glyph_infos, buf.glyph_positions
-
-def _shape_text_hb(text: str, font_size: int):
-    if not HAS_UHARFBUZZ or not text:
-        return []
-
-    shaped_runs = []
-    for face, run_text in _split_text_into_shaping_runs(text):
-        shaped = _shape_run_hb(face, run_text, font_size)
-        if shaped[0] is not None and shaped[1]:
-            shaped_runs.append(shaped)
-    return shaped_runs
-
-def _get_glyph_border(face: freetype.Face, glyph_id: int, font_size: int):
-    face.set_pixel_sizes(0, font_size)
-    face.load_glyph(glyph_id, freetype.FT_LOAD_DEFAULT | freetype.FT_LOAD_NO_BITMAP)
-    return face.glyph.get_glyph()
 
 def _paste_bitmap(canvas: np.ndarray, bitmap_arr: np.ndarray, x: int, y: int, mode: str = 'max'):
+    x = int(round(x))
+    y = int(round(y))
     rows, width = bitmap_arr.shape
     paste_y_start = max(0, y)
     paste_x_start = max(0, x)
@@ -717,76 +770,241 @@ def _paste_bitmap(canvas: np.ndarray, bitmap_arr: np.ndarray, x: int, y: int, mo
     else:
         canvas[paste_y_start:paste_y_end, paste_x_start:paste_x_end] = np.maximum(target, bitmap_slice)
 
-def _render_thai_shaped_line(line_text: str, font_size: int, border_size: int, config=None, stroke_ratio: float = 0.07, letter_spacing: float = 1.0):
-    if not line_text or not HAS_UHARFBUZZ or not contains_thai_text(line_text):
+
+def _bitmap_to_array(bitmap) -> Optional[np.ndarray]:
+    rows = int(getattr(bitmap, 'rows', 0))
+    width = int(getattr(bitmap, 'width', 0))
+    buffer = getattr(bitmap, 'buffer', None)
+    if rows <= 0 or width <= 0 or buffer is None or len(buffer) != rows * width:
         return None
+    return np.asarray(buffer, dtype=np.uint8).reshape((rows, width))
 
-    shaped_runs = _shape_text_hb(line_text, font_size)
-    if not shaped_runs:
+
+def _paste_glyph_bitmaps(
+    canvas_text: np.ndarray,
+    canvas_border: np.ndarray,
+    bitmap_char: np.ndarray,
+    char_place_x: int,
+    char_place_y: int,
+    bitmap_border: Optional[np.ndarray] = None,
+):
+    _paste_bitmap(canvas_text, bitmap_char, char_place_x, char_place_y, mode='max')
+    if bitmap_border is None:
+        return
+    border_place_x = char_place_x - round((bitmap_border.shape[1] - bitmap_char.shape[1]) / 2.0)
+    border_place_y = char_place_y - round((bitmap_border.shape[0] - bitmap_char.shape[0]) / 2.0)
+    _paste_bitmap(canvas_border, bitmap_border, border_place_x, border_place_y, mode='add')
+
+
+def _paste_surface(canvas_text: np.ndarray, canvas_border: np.ndarray, surface: dict, paste_x: int, paste_y: int):
+    _paste_bitmap(canvas_text, surface['text'], paste_x, paste_y, mode='max')
+    _paste_bitmap(canvas_border, surface['border'], paste_x, paste_y, mode='add')
+
+
+def _normalize_horizontal_measure_text(text: str) -> str:
+    if not text:
+        return ''
+    normalized_chars = []
+    for char in text:
+        if char in '\r\n':
+            normalized_chars.append(char)
+            continue
+        translated, _ = CJK_Compatibility_Forms_translate(char, 0)
+        normalized_chars.append(translated)
+    return ''.join(normalized_chars)
+
+
+def _create_horizontal_text_layout(line_text: str, font_size: int, letter_spacing: float = 1.0):
+    normalized_text = _normalize_horizontal_measure_text(line_text)
+
+    state = _get_thread_font_state()
+    font_path = state['font'] or DEFAULT_FONT
+    qfont = _get_layout_font_for_state(state, font_path, font_size)
+    qfont.setKerning(True)
+    qfont.setLetterSpacing(QFont.SpacingType.PercentageSpacing, float(letter_spacing) * 100.0)
+
+    if not normalized_text:
+        return normalized_text, qfont, None, None
+
+    layout = QTextLayout(normalized_text, qfont)
+    layout.beginLayout()
+    line = layout.createLine()
+    if not line.isValid():
+        layout.endLayout()
+        return normalized_text, qfont, None, None
+    line.setLineWidth(1_000_000.0)
+    line.setPosition(QPointF(0.0, 0.0))
+    layout.endLayout()
+    return normalized_text, qfont, layout, line
+
+
+def _get_horizontal_line_frame_metrics(line_text: str, font_size: int, letter_spacing: float = 1.0) -> dict:
+    normalized_text, qfont, _, line = _create_horizontal_text_layout(line_text, font_size, letter_spacing=letter_spacing)
+    font_metrics = QFontMetricsF(qfont)
+    if line is None:
+        return {
+            'text': normalized_text,
+            'logical_width': 0.0,
+            'ascent': float(font_metrics.ascent()),
+            'height': float(font_metrics.height()),
+            'descent': float(font_metrics.descent()),
+        }
+    return {
+        'text': normalized_text,
+        'logical_width': _get_horizontal_line_logical_width(line, len(normalized_text)),
+        'ascent': float(line.ascent()),
+        'height': float(line.height()),
+        'descent': float(line.descent()),
+    }
+
+
+def _get_horizontal_line_logical_width(line, text_length: int) -> float:
+    cursor_x = line.cursorToX(text_length)
+    if isinstance(cursor_x, tuple):
+        cursor_x = cursor_x[0]
+    return float(cursor_x)
+
+
+def _crop_bitmap_pair(text_canvas: np.ndarray, border_canvas: np.ndarray):
+    combined = cv2.add(text_canvas, border_canvas)
+    if not np.any(combined):
         return None
-
-    total_advance = 0
-    shaped_payload = []
-    for face, glyph_infos, glyph_positions in shaped_runs:
-        face.set_pixel_sizes(0, font_size)
-        advances = [_scale_advance(pos.x_advance >> 6, letter_spacing) for pos in glyph_positions]
-        shaped_payload.append((face, glyph_infos, glyph_positions, advances))
-        total_advance += sum(advances)
-
-    temp_w = max(font_size * 6, total_advance + (font_size + border_size) * 8)
-    temp_h = max(font_size * 6, (font_size + border_size) * 6)
-    canvas_text = np.zeros((temp_h, temp_w), dtype=np.uint8)
-    canvas_border = np.zeros((temp_h, temp_w), dtype=np.uint8)
-
-    origin_x = (font_size + border_size) * 2
-    baseline_y = (font_size + border_size) * 3
-    pen_x = origin_x
-
-    for face, glyph_infos, glyph_positions, advances in shaped_payload:
-        for info, pos, advance_x in zip(glyph_infos, glyph_positions, advances):
-            x_offset = pos.x_offset >> 6
-            y_offset = pos.y_offset >> 6
-            face.load_glyph(info.codepoint, freetype.FT_LOAD_RENDER)
-            slot = face.glyph
-            bitmap = slot.bitmap
-            if bitmap.rows * bitmap.width > 0 and len(bitmap.buffer) == bitmap.rows * bitmap.width:
-                bitmap_char = np.array(bitmap.buffer, dtype=np.uint8).reshape((bitmap.rows, bitmap.width))
-                glyph_x = pen_x + x_offset + slot.bitmap_left
-                glyph_y = baseline_y - slot.bitmap_top - y_offset
-                _paste_bitmap(canvas_text, bitmap_char, glyph_x, glyph_y, mode='max')
-
-            if border_size > 0:
-                glyph_border = _get_glyph_border(face, info.codepoint, font_size)
-                stroker = freetype.Stroker()
-                stroke_radius = 64 * max(int(stroke_ratio * font_size), 1)
-                stroker.set(stroke_radius, freetype.FT_STROKER_LINEJOIN_ROUND, freetype.FT_STROKER_LINECAP_ROUND, 0)
-                glyph_border.stroke(stroker, destroy=True)
-                blyph = glyph_border.to_bitmap(freetype.FT_RENDER_MODE_NORMAL, freetype.Vector(0, 0), True)
-                bitmap_b = blyph.bitmap
-                if bitmap_b.rows * bitmap_b.width > 0 and len(bitmap_b.buffer) == bitmap_b.rows * bitmap_b.width:
-                    bitmap_border = np.array(bitmap_b.buffer, dtype=np.uint8).reshape((bitmap_b.rows, bitmap_b.width))
-                    border_left = getattr(blyph, 'left', slot.bitmap_left)
-                    border_top = getattr(blyph, 'top', slot.bitmap_top)
-                    border_x = pen_x + x_offset + border_left
-                    border_y = baseline_y - border_top - y_offset
-                    _paste_bitmap(canvas_border, bitmap_border, border_x, border_y, mode='add')
-
-            pen_x += advance_x
-
-    combined = cv2.add(canvas_text, canvas_border)
     x, y, w, h = cv2.boundingRect(combined)
     if w == 0 or h == 0:
         return None
+    return text_canvas[y:y+h, x:x+w], border_canvas[y:y+h, x:x+w], x, y, w, h
+
+
+def _render_horizontal_line_surface(
+    line_text: str,
+    font_size: int,
+    border_size: int,
+    stroke_ratio: float = 0.07,
+    reversed_direction: bool = False,
+    letter_spacing: float = 1.0,
+):
+    if not line_text:
+        return None
+
+    normalized_text, _, layout, line = _create_horizontal_text_layout(line_text, font_size, letter_spacing=letter_spacing)
+    if line is None:
+        return None
+
+    path = QPainterPath()
+    for glyph_run in layout.glyphRuns():
+        raw_font = glyph_run.rawFont()
+        glyph_indexes = glyph_run.glyphIndexes()
+        positions = glyph_run.positions()
+        for glyph_index, pos in zip(glyph_indexes, positions):
+            glyph_path = raw_font.pathForGlyph(glyph_index)
+            if glyph_path.isEmpty():
+                continue
+            glyph_path.translate(pos.x(), pos.y())
+            path.addPath(glyph_path)
+
+    if path.isEmpty():
+        return None
+
+    fill_alpha, fill_left, fill_top = _rasterize_path_to_alpha(path)
+    if fill_alpha.size == 0:
+        return None
+
+    if border_size > 0:
+        stroke_path = _create_stroke_path(path, max(int(stroke_ratio * font_size), 1))
+        border_alpha, border_left, border_top = _rasterize_path_to_alpha(stroke_path)
+        left = min(fill_left, border_left)
+        top = min(fill_top, border_top)
+        right = max(fill_left + fill_alpha.shape[1], border_left + border_alpha.shape[1])
+        bottom = max(fill_top + fill_alpha.shape[0], border_top + border_alpha.shape[0])
+        text_canvas = np.zeros((bottom - top, right - left), dtype=np.uint8)
+        border_canvas = np.zeros((bottom - top, right - left), dtype=np.uint8)
+        _paste_bitmap(text_canvas, fill_alpha, fill_left - left, fill_top - top, mode='max')
+        _paste_bitmap(border_canvas, border_alpha, border_left - left, border_top - top, mode='max')
+    else:
+        left, top = fill_left, fill_top
+        text_canvas = fill_alpha
+        border_canvas = np.zeros_like(fill_alpha)
+
+    cropped = _crop_bitmap_pair(text_canvas, border_canvas)
+    if cropped is None:
+        return None
+
+    text_bitmap, border_bitmap, x, y, w, h = cropped
+    logical_width = _get_horizontal_line_logical_width(line, len(normalized_text))
+    origin_x = 0.0 if not reversed_direction else -logical_width
+    line_ascent = float(line.ascent())
+    line_height = float(line.height())
+    baseline_y = line_ascent
+    ink_top = float(top + y)
+    ink_bottom = float(top + y + h)
+    return {
+        'text': text_bitmap,
+        'border': border_bitmap,
+        'left_rel': left + x - origin_x,
+        'right_rel': left + x - origin_x + w,
+        'top_rel': top + y - baseline_y,
+        'width': w,
+        'height': h,
+        'line_ascent': line_ascent,
+        'line_descent': float(line.descent()),
+        'line_height': line_height,
+        'ink_top': ink_top,
+        'ink_bottom': ink_bottom,
+    }
+
+
+def _render_horizontal_block_surface(
+    font_size: int,
+    content: str,
+    border_size: int,
+    stroke_ratio: float = 0.07,
+    rotate_90: bool = False,
+    letter_spacing: float = 1.0,
+):
+    content = _normalize_horizontal_block_content(content)
+    if not content:
+        return None
+
+    surface = _render_horizontal_line_surface(
+        content,
+        font_size,
+        border_size,
+        stroke_ratio=stroke_ratio,
+        reversed_direction=False,
+        letter_spacing=letter_spacing,
+    )
+    if surface is None:
+        return None
+
+    text_bitmap = surface['text']
+    border_bitmap = surface['border']
+    if rotate_90:
+        text_bitmap = cv2.rotate(text_bitmap, cv2.ROTATE_90_CLOCKWISE)
+        border_bitmap = cv2.rotate(border_bitmap, cv2.ROTATE_90_CLOCKWISE)
+        cropped = _crop_bitmap_pair(text_bitmap, border_bitmap)
+        if cropped is None:
+            return None
+        text_bitmap, border_bitmap, _, _, w, h = cropped
+    else:
+        h, w = text_bitmap.shape
 
     return {
-        'text': canvas_text[y:y+h, x:x+w],
-        'border': canvas_border[y:y+h, x:x+w],
-        'left_rel': x - origin_x,
-        'right_rel': x - origin_x + w,
-        'top_rel': y - baseline_y,
+        'text': text_bitmap,
+        'border': border_bitmap,
         'width': w,
         'height': h,
     }
+
+
+def _clamp_surface_origin(canvas_shape, paste_x: int, paste_y: int, width: int, height: int):
+    canvas_h, canvas_w = canvas_shape
+    if width <= 0 or height <= 0:
+        return None
+    paste_x = max(0, min(int(paste_x), canvas_w - width))
+    paste_y = max(0, min(int(paste_y), canvas_h - height))
+    if paste_x < 0 or paste_y < 0 or paste_x + width > canvas_w or paste_y + height > canvas_h:
+        return None
+    return paste_x, paste_y
 
 
 def _normalize_letter_spacing(letter_spacing: float) -> float:
@@ -804,6 +1022,204 @@ def _scale_advance(advance: int, letter_spacing: float) -> int:
     if multiplier == 1.0:
         return int(advance)
     return max(1, int(round(advance * multiplier)))
+
+
+def _resolve_vertical_char_offset(slot, cdpt: str, font_size: int, letter_spacing: float = 1.0) -> int:
+    char_offset_y = font_size
+    metrics = getattr(slot, 'metrics', None)
+    if metrics:
+        if getattr(metrics, 'vertAdvance', 0):
+            char_offset_y = metrics.vertAdvance >> 6
+        elif getattr(metrics, 'height', 0):
+            char_offset_y = metrics.height >> 6
+
+        if _is_vertical_ellipsis_char(cdpt):
+            bitmap_char = _bitmap_to_array(slot.bitmap)
+            bitmap_rows = 0 if bitmap_char is None else bitmap_char.shape[0]
+            char_offset_y = _smart_vertical_ellipsis_advance(slot, font_size, bitmap_rows, bitmap_char)
+
+    advance = getattr(getattr(slot, 'advance', None), 'y', 0)
+    if char_offset_y == font_size and advance:
+        char_offset_y = advance >> 6
+    return _scale_advance(char_offset_y, letter_spacing)
+
+
+def _compute_vertical_cell_offset(bitmap_char: np.ndarray, advance_y: int) -> int:
+    if bitmap_char is None or bitmap_char.size == 0:
+        return 0
+
+    rows = bitmap_char.shape[0]
+    ink_y = 0
+    ink_h = rows
+    ink_rect = _get_bitmap_ink_rect(bitmap_char)
+    if ink_rect is not None:
+        _, ink_y, _, ink_h = ink_rect
+    return round((advance_y - ink_h) / 2.0) - ink_y
+
+
+def _get_bitmap_ink_rect(bitmap_char: Optional[np.ndarray]) -> Optional[Tuple[int, int, int, int]]:
+    if bitmap_char is None or bitmap_char.size == 0:
+        return None
+    rows, width = bitmap_char.shape
+    if rows <= 0 or width <= 0:
+        return None
+    nz = cv2.findNonZero(bitmap_char)
+    if nz is None:
+        return None
+    x, y, w, h = cv2.boundingRect(nz)
+    return int(x), int(y), int(w), int(h)
+
+
+def _resolve_vertical_slot_height(font_size: int, cdpt: str, advance_y: int) -> int:
+    if cdpt in _VERTICAL_COMPACT_SLOT:
+        compact_height = max(1, int(round(font_size * 0.55)))
+        return max(1, min(advance_y, compact_height))
+    return max(1, advance_y)
+
+
+def _resolve_vertical_char_bias(
+    font_size: int,
+    cdpt: str,
+    line_width: int,
+    slot_height: int,
+    ink_rect: Optional[Tuple[int, int, int, int]],
+) -> Tuple[int, int]:
+    bias_x = 0
+    bias_y = 0
+    compact_shift = max(0, int(round((font_size - slot_height) / 2.0)))
+    if cdpt in _VERTICAL_OPEN_BRACKETS or cdpt in _VERTICAL_PUNCT_UP:
+        bias_y -= compact_shift
+    elif cdpt in _VERTICAL_CLOSE_BRACKETS:
+        bias_y += compact_shift
+
+    if cdpt in _VERTICAL_PUNCT_TOP_RIGHT and ink_rect is not None:
+        bias_x += max(1, int(round(max(0.0, line_width - ink_rect[2]) / 4.0)))
+    return bias_x, bias_y
+
+
+def _get_vertical_char_draw_state(font_size: int, cdpt: str, line_width: int, letter_spacing: float = 1.0) -> dict:
+    translated, rot_degree = CJK_Compatibility_Forms_translate(cdpt, 1)
+    slot = get_char_glyph(translated, font_size, 1)
+    bitmap_char = _bitmap_to_array(slot.bitmap)
+    advance_y = _resolve_vertical_char_offset(slot, translated, font_size, letter_spacing=letter_spacing)
+    advance_y = _resolve_vertical_slot_height(font_size, translated, advance_y)
+    if bitmap_char is None:
+        return {
+            'translated': translated,
+            'rot_degree': rot_degree,
+            'bitmap': None,
+            'advance_y': advance_y,
+            'x': 0,
+            'y': 0,
+        }
+
+    if rot_degree == 90:
+        bitmap_char = cv2.rotate(bitmap_char, cv2.ROTATE_90_CLOCKWISE)
+    char_bitmap_rows, char_bitmap_width = bitmap_char.shape
+    ink_rect = _get_bitmap_ink_rect(bitmap_char)
+    ink_x = 0.0
+    ink_w = float(char_bitmap_width)
+    if ink_rect is not None:
+        ink_x, _, ink_w, _ = ink_rect
+    bias_x, bias_y = _resolve_vertical_char_bias(font_size, translated, line_width, advance_y, ink_rect)
+    return {
+        'translated': translated,
+        'rot_degree': rot_degree,
+        'bitmap': bitmap_char,
+        'advance_y': advance_y,
+        'x': round((line_width - ink_w) / 2.0) - ink_x + bias_x,
+        'y': _compute_vertical_cell_offset(bitmap_char, advance_y) + bias_y,
+    }
+
+
+def _get_vertical_block_surface(
+    font_size: int,
+    raw_content: str,
+    border_size: int,
+    stroke_ratio: float,
+    letter_spacing: float,
+    cache: dict,
+):
+    rotate_90 = should_rotate_horizontal_block_90(raw_content)
+    content = _normalize_horizontal_block_content(raw_content)
+    if not content:
+        return None
+    cache_key = (font_size, content, border_size, round(float(stroke_ratio), 4), rotate_90, round(_normalize_letter_spacing(letter_spacing), 4))
+    if cache_key in cache:
+        return cache[cache_key]
+    cache[cache_key] = _render_horizontal_block_surface(
+        font_size,
+        content,
+        border_size,
+        stroke_ratio=stroke_ratio,
+        rotate_90=rotate_90,
+        letter_spacing=letter_spacing,
+    )
+    return cache[cache_key]
+
+
+def _measure_vertical_line_geometry(
+    font_size: int,
+    line_text: str,
+    border_size: int,
+    stroke_ratio: float,
+    letter_spacing: float,
+    block_surface_cache: dict,
+) -> dict:
+    line_width = font_size
+    parts = re.split(r'(<H>.*?</H>)', line_text, flags=re.IGNORECASE | re.DOTALL)
+    for part in parts:
+        if not part:
+            continue
+        is_horizontal_block = part.lower().startswith('<h>') and part.lower().endswith('</h>')
+        if is_horizontal_block:
+            surface = _get_vertical_block_surface(font_size, part[3:-4], border_size, stroke_ratio, letter_spacing, block_surface_cache)
+            if surface is not None:
+                line_width = max(line_width, int(surface['width']))
+            continue
+        for c in part:
+            line_width = max(line_width, _get_vertical_column_char_width(font_size, c))
+
+    cursor_y = 0
+    min_y = None
+    max_y = None
+    for part in parts:
+        if not part:
+            continue
+        is_horizontal_block = part.lower().startswith('<h>') and part.lower().endswith('</h>')
+        if is_horizontal_block:
+            surface = _get_vertical_block_surface(font_size, part[3:-4], border_size, stroke_ratio, letter_spacing, block_surface_cache)
+            if surface is None:
+                continue
+            block_top = cursor_y
+            block_bottom = cursor_y + int(surface['height'])
+            min_y = block_top if min_y is None else min(min_y, block_top)
+            max_y = block_bottom if max_y is None else max(max_y, block_bottom)
+            cursor_y += int(surface['height'])
+            continue
+
+        for c in part:
+            if c == '＿':
+                cursor_y += _scale_advance(font_size, letter_spacing)
+                continue
+            state = _get_vertical_char_draw_state(font_size, c, line_width, letter_spacing=letter_spacing)
+            advance_y = int(state['advance_y'])
+            bitmap_char = state['bitmap']
+            if bitmap_char is not None:
+                char_top = cursor_y + int(state['y'])
+                char_bottom = char_top + bitmap_char.shape[0]
+                min_y = char_top if min_y is None else min(min_y, char_top)
+                max_y = char_bottom if max_y is None else max(max_y, char_bottom)
+            cursor_y += advance_y
+    if min_y is None or max_y is None:
+        min_y = 0
+        max_y = 0
+    return {
+        'width': line_width,
+        'min_y': min_y,
+        'max_y': max_y,
+        'height': max(0, max_y - min_y),
+    }
 
 
 def _normalize_line_spacing(line_spacing: float) -> float:
@@ -826,93 +1242,45 @@ def calc_horizontal_line_spacing_px(font_size: int, line_spacing: float) -> int:
     return int(font_size * 0.01 * resolve_horizontal_line_spacing_multiplier(line_spacing))
 
 
-class namespace:
-    pass
-
-class Glyph:
-    def __init__(self, glyph):
-        self.bitmap = namespace()
-        self.bitmap.buffer = glyph.bitmap.buffer
-        self.bitmap.rows = glyph.bitmap.rows
-        self.bitmap.width = glyph.bitmap.width
-        self.advance = namespace()
-        self.advance.x = glyph.advance.x
-        self.advance.y = glyph.advance.y
-        self.bitmap_left = glyph.bitmap_left
-        self.bitmap_top = glyph.bitmap_top
-        self.metrics = namespace()
-        self.metrics.vertBearingX = glyph.metrics.vertBearingX
-        self.metrics.vertBearingY = glyph.metrics.vertBearingY
-        self.metrics.horiBearingX = glyph.metrics.horiBearingX
-        self.metrics.horiBearingY = glyph.metrics.horiBearingY
-        self.metrics.horiAdvance = glyph.metrics.horiAdvance
-        self.metrics.vertAdvance = glyph.metrics.vertAdvance
-
-def get_char_glyph(cdpt: str, font_size: int, direction: int) -> Glyph:
+def _resolve_glyph_spec(cdpt: str, font_size: int) -> Tuple[str, int]:
     state = _get_thread_font_state()
-    cache_key = (cdpt, font_size, direction)
-    cached = state['glyph_cache'].get(cache_key)
-    if cached is not None:
-        return cached
-
     font_selection = state['font_selection']
-    for i, face in enumerate(font_selection):
-        char_index = face.get_char_index(cdpt)
-        if char_index != 0:
-            # Character found, load and return glyph
-            if direction == 0:
-                face.set_pixel_sizes(0, font_size)
-            elif direction == 1:
-                face.set_pixel_sizes(font_size, 0)
-            face.load_char(cdpt)
-            return _cache_glyph(state, cache_key, Glyph(face.glyph))
-        
-        # Log fallback attempt only on the primary font for clarity
+    for i, font_path in enumerate(font_selection):
+        raw_font = _get_raw_font_for_state(state, font_path, font_size)
+        glyph_indexes = raw_font.glyphIndexesForString(cdpt)
+        glyph_id = glyph_indexes[0] if glyph_indexes else 0
+        if glyph_id != 0:
+            return font_path, int(glyph_id)
+
         if i == 0:
             try:
-                font_name = face.family_name.decode('utf-8') if face.family_name else 'Unknown'
-                logger.debug(f"Character '{cdpt}' not found in primary font '{font_name}'. Trying fallbacks.")
+                logger.debug(f"Character '{cdpt}' not found in primary font '{font_path}'. Trying fallbacks.")
             except Exception:
-                pass # Avoid logging errors within logging
+                pass
 
-    # If the loop completes, the character was not found in any font.
     logger.error(f"FATAL: Character '{cdpt}' (U+{ord(cdpt):04X}) not found in any of the available fonts. Substituting with a placeholder.")
-    
-    # To prevent a crash, recursively call with a placeholder that is guaranteed to exist.
-    # Use '?' as placeholder instead of space - it's visible and indicates missing character
-    # Avoid infinite recursion if placeholder itself is not found
     if cdpt in (' ', '?', '□'):
-        # This should never happen with valid fonts, but as a safeguard:
-        # We can't return a glyph, so we must raise an exception.
         raise RuntimeError(f"Catastrophic failure: Placeholder character '{cdpt}' not found in any font.")
-    
-    # Try '?' first (visible placeholder), then '□' (replacement character), then space
     for placeholder in ('?', '□', ' '):
-        if placeholder != cdpt:
-            try:
-                return _cache_glyph(state, cache_key, get_char_glyph(placeholder, font_size, direction))
-            except RuntimeError:
-                continue
-    
-    # Last resort - should never reach here
+        if placeholder == cdpt:
+            continue
+        try:
+            return _resolve_glyph_spec(placeholder, font_size)
+        except RuntimeError:
+            continue
     raise RuntimeError("Catastrophic failure: No placeholder character found in any font.")
 
+
+def get_char_glyph(cdpt: str, font_size: int, direction: int) -> SimpleNamespace:
+    font_path, glyph_id = _resolve_glyph_spec(cdpt, font_size)
+    return _build_glyph_from_path(font_path, glyph_id, font_size)
+
+
 # 缓存 glyph border 对象，避免重复创建导致内存泄漏
-# 注意：由于 stroke() 会修改 glyph，这里不缓存 glyph，而是直接返回新对象
-# 真正的优化在 _stroke_border_cache 中缓存最终的 bitmap 结果
-def get_char_border(cdpt: str, font_size: int, direction: int):
-    font_selection = _get_thread_font_state()['font_selection']
-    for i, face in enumerate(font_selection):
-        char_index = face.get_char_index(cdpt)
-        if char_index == 0 and i != len(font_selection) - 1:
-            continue
-        if direction == 0:
-            face.set_pixel_sizes(0, font_size)
-        elif direction == 1:
-            face.set_pixel_sizes(font_size, 0)
-        face.load_char(cdpt, freetype.FT_LOAD_DEFAULT | freetype.FT_LOAD_NO_BITMAP)
-        slot_border = face.glyph
-        return slot_border.get_glyph()
+# Qt 版直接缓存最终描边 bitmap 结果。
+def get_char_border(cdpt: str, font_size: int, direction: int, stroke_ratio: float = 0.07):
+    font_path, glyph_id = _resolve_glyph_spec(cdpt, font_size)
+    return _build_stroked_glyph_bitmap(font_path, glyph_id, font_size, stroke_ratio)
 
 def _is_vertical_ellipsis_char(cdpt: str) -> bool:
     # Support all common ellipsis forms that may appear in vertical flow.
@@ -973,201 +1341,52 @@ def _smart_vertical_ellipsis_advance(slot, font_size: int, char_bitmap_rows: int
 
     return max(1, raw)
 
-def _measure_vertical_char_metrics(font_size: int, cdpt: str, letter_spacing: float = 1.0):
-    """Return (advance_y, top_offset, bitmap_rows, has_visible_ink) for vertical rendering."""
-    cdpt_trans, _ = CJK_Compatibility_Forms_translate(cdpt, 1)
-    slot = get_char_glyph(cdpt_trans, font_size, 1)
-    bitmap = slot.bitmap
-    char_bitmap_rows = bitmap.rows
-    char_bitmap_width = bitmap.width
-
-    char_offset_y = font_size
-    if hasattr(slot, 'metrics') and slot.metrics:
-        if hasattr(slot.metrics, 'vertAdvance') and slot.metrics.vertAdvance:
-            char_offset_y = slot.metrics.vertAdvance >> 6
-        elif hasattr(slot.metrics, 'height') and slot.metrics.height:
-            char_offset_y = slot.metrics.height >> 6
-
-        if _is_vertical_ellipsis_char(cdpt_trans):
-            bitmap_char = None
-            if char_bitmap_rows * char_bitmap_width > 0 and len(bitmap.buffer) == char_bitmap_rows * char_bitmap_width:
-                bitmap_char = np.array(bitmap.buffer, dtype=np.uint8).reshape((char_bitmap_rows, char_bitmap_width))
-            char_offset_y = _smart_vertical_ellipsis_advance(slot, font_size, char_bitmap_rows, bitmap_char)
-
-    if char_offset_y == font_size and hasattr(slot, 'advance') and slot.advance:
-        if hasattr(slot.advance, 'y') and slot.advance.y:
-            char_offset_y = slot.advance.y >> 6
-
-    has_bitmap = (
-        char_bitmap_rows * char_bitmap_width > 0 and
-        len(bitmap.buffer) == char_bitmap_rows * char_bitmap_width
-    )
-    char_offset_y = _scale_advance(char_offset_y, letter_spacing)
-    if has_bitmap:
-        # Keep vertical alignment in font-metrics space to avoid glyph-specific top snapping.
-        top_offset = (slot.metrics.vertBearingY >> 6) if (hasattr(slot, 'metrics') and slot.metrics and hasattr(slot.metrics, 'vertBearingY')) else 0
-        return char_offset_y, top_offset, char_bitmap_rows, True
-    return char_offset_y, 0, 0, False
-
 def _get_vertical_column_char_width(font_size: int, cdpt: str) -> int:
     """Column frame width for vertical layout (Ballons-style: frame + ink), in pixels."""
-    cdpt_trans, _ = CJK_Compatibility_Forms_translate(cdpt, 1)
+    cdpt_trans, rot_degree = CJK_Compatibility_Forms_translate(cdpt, 1)
     slot = get_char_glyph(cdpt_trans, font_size, 1)
     width = font_size
     if hasattr(slot, 'metrics') and slot.metrics and hasattr(slot.metrics, 'horiAdvance') and slot.metrics.horiAdvance:
         width = max(width, slot.metrics.horiAdvance >> 6)
-    bitmap = slot.bitmap
-    if bitmap.rows * bitmap.width > 0 and len(bitmap.buffer) == bitmap.rows * bitmap.width:
-        bitmap_char = np.array(bitmap.buffer, dtype=np.uint8).reshape((bitmap.rows, bitmap.width))
-        nz = cv2.findNonZero(bitmap_char)
-        if nz is not None:
-            _, _, ink_w, _ = cv2.boundingRect(nz)
-            width = max(width, ink_w)
-        else:
-            width = max(width, bitmap.width)
+    bitmap_char = _bitmap_to_array(slot.bitmap)
+    if bitmap_char is not None and rot_degree == 90:
+        bitmap_char = cv2.rotate(bitmap_char, cv2.ROTATE_90_CLOCKWISE)
+    ink_rect = _get_bitmap_ink_rect(bitmap_char)
+    if ink_rect is not None:
+        width = max(width, ink_rect[2])
+    elif bitmap_char is not None:
+        width = max(width, bitmap_char.shape[1])
     return max(1, int(width))
 
-def _measure_horizontal_block_render_height(font_size: int, content: str, border_size: int, config=None, stroke_ratio: float = 0.07, rotate_90: bool = False, letter_spacing: float = 1.0) -> int:
-    """Measure the actual rendered pixel height of a horizontal block used in vertical text."""
-    if not rotate_90:
-        rotate_90 = should_rotate_horizontal_block_90(content)
-    content = _normalize_horizontal_block_content(content)
-    if not content:
+def _measure_horizontal_text_width(text: str, font_size: int, letter_spacing: float = 1.0) -> int:
+    if not text:
         return 0
 
-    h_width = get_string_width(font_size, content, letter_spacing=letter_spacing) + font_size
-    h_height = font_size * 2
-    temp_canvas_text = np.zeros((h_height, h_width), dtype=np.uint8)
-    temp_canvas_border = np.zeros((h_height, h_width), dtype=np.uint8)
-    pen_h = [font_size // 2, font_size]
-
-    for char_h in content:
-        if char_h == '！':
-            char_h = '!'
-        elif char_h == '？':
-            char_h = '?'
-        offset_x = put_char_horizontal(
-            font_size,
-            char_h,
-            pen_h,
-            temp_canvas_text,
-            temp_canvas_border,
-            border_size=border_size,
-            config=config,
-            stroke_width=stroke_ratio,
-            letter_spacing=letter_spacing
+    normalized_text = _normalize_horizontal_measure_text(text)
+    if '\n' in normalized_text or '\r' in normalized_text:
+        return max(
+            (_measure_horizontal_text_width(part, font_size, letter_spacing=letter_spacing) for part in normalized_text.splitlines()),
+            default=0,
         )
-        pen_h[0] += offset_x
 
-    if rotate_90:
-        temp_canvas_text = cv2.rotate(temp_canvas_text, cv2.ROTATE_90_CLOCKWISE)
-        temp_canvas_border = cv2.rotate(temp_canvas_border, cv2.ROTATE_90_CLOCKWISE)
+    state = _get_thread_font_state()
+    cache_key = (
+        'logical_width',
+        state.get('font') or DEFAULT_FONT,
+        int(max(font_size, 1)),
+        round(_normalize_letter_spacing(letter_spacing), 4),
+        normalized_text,
+    )
+    cached = state['measure_cache'].get(cache_key)
+    if cached is not None:
+        return cached
 
-    combined_temp = cv2.add(temp_canvas_text, temp_canvas_border)
-    x, y, w, h_crop = cv2.boundingRect(combined_temp)
-    if w == 0 or h_crop == 0:
-        return 0
-    return h_crop
-
-def _measure_vertical_line_visual_extents(line_text: str, font_size: int, border_size: int, config=None, stroke_ratio: float = 0.07, letter_spacing: float = 1.0):
-    """Measure visual ink extents (top, bottom) for one vertical line, relative to line start pen y."""
-    pen_y = 0
-    min_y = None
-    max_y = None
-
-    parts = re.split(r'(<H>.*?</H>)', line_text, flags=re.IGNORECASE | re.DOTALL)
-    for part in parts:
-        if not part:
-            continue
-
-        is_horizontal_block = part.lower().startswith('<h>') and part.lower().endswith('</h>')
-        if is_horizontal_block:
-            content = part[3:-4]
-            if not content:
-                continue
-            rh = _measure_horizontal_block_render_height(
-                font_size,
-                content,
-                border_size=border_size,
-                config=config,
-                stroke_ratio=stroke_ratio,
-                rotate_90=should_rotate_horizontal_block_90(content),
-                letter_spacing=letter_spacing
-            )
-            if rh > 0:
-                block_top = pen_y
-                block_bottom = pen_y + rh
-                min_y = block_top if min_y is None else min(min_y, block_top)
-                max_y = block_bottom if max_y is None else max(max_y, block_bottom)
-            pen_y += rh
-            continue
-
-        for c in part:
-            if not c:
-                continue
-            char_offset_y, top_offset, char_rows, has_ink = _measure_vertical_char_metrics(font_size, c, letter_spacing=letter_spacing)
-            if has_ink and char_rows > 0:
-                char_top = pen_y + top_offset
-                char_bottom = char_top + char_rows
-                min_y = char_top if min_y is None else min(min_y, char_top)
-                max_y = char_bottom if max_y is None else max(max_y, char_bottom)
-            pen_y += char_offset_y
-
-    if min_y is None or max_y is None:
-        return 0, 0
-    return min_y, max_y
-
-def _measure_horizontal_line_visual_extents(line_text: str, font_size: int, border_size: int, config=None, stroke_ratio: float = 0.07, reversed_direction: bool = False, letter_spacing: float = 1.0):
-    """Measure visual ink extents (left, right) for one horizontal line, relative to line start pen x."""
-    if not line_text:
-        return 0, 0
-
-    if not reversed_direction and HAS_UHARFBUZZ and contains_thai_text(line_text):
-        shaped_line = _render_thai_shaped_line(
-            line_text,
-            font_size,
-            border_size=border_size,
-            config=config,
-            stroke_ratio=stroke_ratio,
-            letter_spacing=letter_spacing,
-        )
-        if shaped_line is not None:
-            return shaped_line['left_rel'], shaped_line['right_rel']
-
-    total_advance = get_string_width(font_size, line_text, letter_spacing=letter_spacing)
-    temp_w = max(font_size * 4, total_advance + (font_size + border_size) * 4)
-    temp_h = max(font_size * 3, (font_size + border_size) * 4)
-    canvas_text = np.zeros((temp_h, temp_w), dtype=np.uint8)
-    canvas_border = np.zeros((temp_h, temp_w), dtype=np.uint8)
-
-    origin_x = (font_size + border_size) if not reversed_direction else (temp_w - (font_size + border_size))
-    pen = [origin_x, font_size + border_size]
-
-    for c in line_text:
-        if reversed_direction:
-            offset_x = get_char_offset_x(font_size, c, letter_spacing=letter_spacing)
-            pen[0] -= offset_x
-        offset_x = put_char_horizontal(
-            font_size,
-            c,
-            pen,
-            canvas_text,
-            canvas_border,
-            border_size=border_size,
-            config=config,
-            stroke_width=stroke_ratio,
-            letter_spacing=letter_spacing
-        )
-        if not reversed_direction:
-            pen[0] += offset_x
-
-    combined = cv2.add(canvas_text, canvas_border)
-    x, _, w, _ = cv2.boundingRect(combined)
-    if w == 0:
-        return 0, 0
-    left_rel = x - origin_x
-    right_rel = left_rel + w
-    return left_rel, right_rel
+    _, _, _, line = _create_horizontal_text_layout(normalized_text, font_size, letter_spacing=letter_spacing)
+    width = 0 if line is None else int(round(_get_horizontal_line_logical_width(line, len(normalized_text))))
+    if len(state['measure_cache']) >= 4096:
+        state['measure_cache'].clear()
+    state['measure_cache'][cache_key] = width
+    return width
 
 def calc_horizontal_block_height(font_size: int, content: str, letter_spacing: float = 1.0) -> int:
     """
@@ -1183,64 +1402,17 @@ def calc_horizontal_block_height(font_size: int, content: str, letter_spacing: f
     if not content:
         return font_size
 
-    # 对字母/数字块启用90度旋转
-    if rotate_90:
-        # --- 计算竖排旋转块的高度 ---
-        # 使用与渲染相同的方式：横排渲染后旋转90度
-        # 旋转后，原来的宽度变成高度
-        total_width = get_string_width(font_size, content, letter_spacing=letter_spacing)
-        # 旋转90度后，宽度变成高度
-        return total_width
-    else:
-        # --- 计算横排块的高度（所有非旋转块） ---
-        h_font_size = font_size
-
-        # 创建临时画布来渲染横排内容
-        h_height = h_font_size * 2
-        h_width = get_string_width(h_font_size, content, letter_spacing=letter_spacing) + h_font_size
-
-        temp_canvas = np.zeros((h_height, h_width), dtype=np.uint8)
-        pen_h = [h_font_size // 2, h_font_size]
-
-        # 渲染每个字符
-        for char_h in content:
-            if char_h == '！':
-                char_h = '!'
-            elif char_h == '？':
-                char_h = '?'
-            try:
-                offset_x = get_char_offset_x(h_font_size, char_h, letter_spacing=letter_spacing)
-                cdpt, _ = CJK_Compatibility_Forms_translate(char_h, 0)
-                slot = get_char_glyph(cdpt, h_font_size, 0)
-                bitmap = slot.bitmap
-
-                if bitmap.rows * bitmap.width > 0 and len(bitmap.buffer) == bitmap.rows * bitmap.width:
-                    bitmap_char = np.array(bitmap.buffer, dtype=np.uint8).reshape((bitmap.rows, bitmap.width))
-                    char_place_x = pen_h[0] + slot.bitmap_left
-                    char_place_y = pen_h[1] - slot.bitmap_top
-
-                    paste_y_start = max(0, char_place_y)
-                    paste_x_start = max(0, char_place_x)
-                    paste_y_end = min(temp_canvas.shape[0], char_place_y + bitmap.rows)
-                    paste_x_end = min(temp_canvas.shape[1], char_place_x + bitmap.width)
-
-                    if paste_y_start < paste_y_end and paste_x_start < paste_x_end:
-                        temp_canvas[paste_y_start:paste_y_end, paste_x_start:paste_x_end] = np.maximum(
-                            temp_canvas[paste_y_start:paste_y_end, paste_x_start:paste_x_end],
-                            bitmap_char[:(paste_y_end-paste_y_start), :(paste_x_end-paste_x_start)]
-                        )
-
-                pen_h[0] += offset_x
-            except Exception:
-                pass
-
-        # 裁剪空白并返回实际高度
-        if np.any(temp_canvas):
-            _, _, _, h_crop = cv2.boundingRect(temp_canvas)
-            return h_crop
-
-        # 如果没有内容，返回默认高度
+    surface = _render_horizontal_block_surface(
+        font_size,
+        content,
+        border_size=0,
+        stroke_ratio=0.0,
+        rotate_90=rotate_90,
+        letter_spacing=letter_spacing,
+    )
+    if surface is None:
         return font_size
+    return int(surface['height']) if surface['height'] > 0 else font_size
 
 def calc_vertical(font_size: int, text: str, max_height: int, config=None, letter_spacing: float = 1.0):
     """
@@ -1324,132 +1496,24 @@ def put_char_vertical(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_
         return _scale_advance(font_size, letter_spacing)
 
     pen = pen_l.copy()
-
-    cdpt, rot_degree = CJK_Compatibility_Forms_translate(cdpt, 1)
-
-    slot = get_char_glyph(cdpt, font_size, 1)
-    bitmap = slot.bitmap
-    char_bitmap_rows = bitmap.rows
-    char_bitmap_width = bitmap.width
-    # 统一的竖排字体度量获取逻辑
-    char_offset_y = font_size  # 默认值
-    
-    if hasattr(slot, 'metrics') and slot.metrics:
-        if hasattr(slot.metrics, 'vertAdvance') and slot.metrics.vertAdvance:
-            char_offset_y = slot.metrics.vertAdvance >> 6
-        elif hasattr(slot.metrics, 'height') and slot.metrics.height:
-            # 使用字符高度作为备选
-            char_offset_y = slot.metrics.height >> 6
-
-        # 连续省略号场景：使用该字体自身的点间距估计行进量，改善两组省略号中缝不等距
-        if _is_vertical_ellipsis_char(cdpt):
-            bitmap_for_ellipsis = None
-            if char_bitmap_rows * char_bitmap_width > 0 and len(bitmap.buffer) == char_bitmap_rows * char_bitmap_width:
-                bitmap_for_ellipsis = np.array(bitmap.buffer, dtype=np.uint8).reshape((char_bitmap_rows, char_bitmap_width))
-            char_offset_y = _smart_vertical_ellipsis_advance(slot, font_size, char_bitmap_rows, bitmap_for_ellipsis)
-    
-    # 如果metrics不可用，尝试使用advance
-    if char_offset_y == font_size and hasattr(slot, 'advance') and slot.advance:
-        if hasattr(slot.advance, 'y') and slot.advance.y:
-            char_offset_y = slot.advance.y >> 6
-    
-    char_offset_y = _scale_advance(char_offset_y, letter_spacing)
-
-    # 如果bitmap为空，直接返回计算好的offset
-    if char_bitmap_rows * char_bitmap_width == 0 or len(bitmap.buffer) != char_bitmap_rows * char_bitmap_width:
-        return char_offset_y
-    bitmap_char = np.array(bitmap.buffer, dtype=np.uint8).reshape((char_bitmap_rows, char_bitmap_width))
-
-    original_bitmap_width = char_bitmap_width
-    
-    # 如果需要旋转90度
-    if rot_degree == 90:
-        # 顺时针旋转90度 (相当于逆时针旋转270度或使用 cv2.ROTATE_90_CLOCKWISE)
-        bitmap_char = cv2.rotate(bitmap_char, cv2.ROTATE_90_CLOCKWISE)
-        # 旋转后更新尺寸
-        char_bitmap_rows, char_bitmap_width = bitmap_char.shape
-
-    # --- ALIGNMENT FIX ---
     if line_width <= 0:
         line_width = font_size
-    # Center by the real non-zero ink box, not raw bitmap width.
-    ink_x = 0
-    ink_w = char_bitmap_width
-    if char_bitmap_rows > 0 and char_bitmap_width > 0:
-        nz = cv2.findNonZero(bitmap_char)
-        if nz is not None:
-            ink_x, _, ink_w, _ = cv2.boundingRect(nz)
+    state = _get_vertical_char_draw_state(font_size, cdpt, line_width, letter_spacing=letter_spacing)
+    bitmap_char = state['bitmap']
+    char_offset_y = int(state['advance_y'])
+    if bitmap_char is None:
+        return char_offset_y
     line_start_x = pen[0] - line_width
-    char_place_x = line_start_x + round((line_width - ink_w) / 2.0) - ink_x
-    # --- END FIX ---
-
-    # 计算Y位置，考虑旋转后的位置补偿
-    if rot_degree == 90:
-        # 旋转后需要调整Y位置：原来的宽度变成了高度
-        # 使用原始宽度的一半作为垂直偏移的基准
-        char_place_y = pen[1] + round((original_bitmap_width - char_bitmap_rows) / 2.0)
-    else:
-        char_place_y = pen[1] + (slot.metrics.vertBearingY >> 6)
-    paste_y_start = max(0, char_place_y)
-    paste_x_start = max(0, char_place_x)
-    paste_y_end = min(canvas_text.shape[0], char_place_y + char_bitmap_rows)
-    paste_x_end = min(canvas_text.shape[1], char_place_x + char_bitmap_width)
-    if paste_y_start >= paste_y_end or paste_x_start >= paste_x_end:
-        logger.warning(f"Char '{cdpt}' is completely outside the canvas or on the boundary, skipped. Position: x={char_place_x}, y={char_place_y}, Canvas size: {canvas_text.shape}")
-    else:
-        bitmap_char_slice = bitmap_char[paste_y_start-char_place_y : paste_y_end-char_place_y,
-                                        paste_x_start-char_place_x : paste_x_end-char_place_x]
-        if bitmap_char_slice.size > 0:
-            canvas_text[paste_y_start:paste_y_end, paste_x_start:paste_x_end] = bitmap_char_slice
+    char_place_x = line_start_x + int(state['x'])
+    char_place_y = pen[1] + int(state['y'])
+    bitmap_border = None
     if border_size > 0:
-        glyph_border = get_char_border(cdpt, font_size, 1)
-        stroker = freetype.Stroker()
-        # Use passed stroke_width, fallback to config or default
-        if stroke_width is None:
-            stroke_ratio = config.render.stroke_width if (config and hasattr(config.render, 'stroke_width')) else 0.07
-        else:
-            stroke_ratio = stroke_width
-        stroke_radius = 64 * max(int(stroke_ratio * font_size), 1)
-        stroker.set(stroke_radius, freetype.FT_STROKER_LINEJOIN_ROUND, freetype.FT_STROKER_LINECAP_ROUND, 0)
-        glyph_border.stroke(stroker, destroy=True)
-        blyph = glyph_border.to_bitmap(freetype.FT_RENDER_MODE_NORMAL, freetype.Vector(0, 0), True)
-        bitmap_b = blyph.bitmap
-        border_bitmap_rows = bitmap_b.rows
-        border_bitmap_width = bitmap_b.width
-        if border_bitmap_rows * border_bitmap_width > 0 and len(bitmap_b.buffer) == border_bitmap_rows * border_bitmap_width:
-            bitmap_border = np.array(bitmap_b.buffer, dtype=np.uint8).reshape((border_bitmap_rows, border_bitmap_width))
-
-            # 如果需要旋转90度，边框也要旋转
-            if rot_degree == 90:
-                bitmap_border = cv2.rotate(bitmap_border, cv2.ROTATE_90_CLOCKWISE)
-                border_bitmap_rows, border_bitmap_width = bitmap_border.shape
-
-            # 改进的边框位置计算：直接基于字符位置和尺寸差异
-            # 避免浮点累积误差
-            size_diff_x = border_bitmap_width - char_bitmap_width
-            size_diff_y = border_bitmap_rows - char_bitmap_rows
-            
-            # 边框应该围绕字符居中，所以偏移是尺寸差的一半
-            pen_border_x = char_place_x - round(size_diff_x / 2.0)
-            pen_border_y = char_place_y - round(size_diff_y / 2.0)
-            pen_border = (max(0, pen_border_x), max(0, pen_border_y))
-            paste_border_y_start = pen_border[1]
-            paste_border_x_start = pen_border[0]
-            paste_border_y_end = min(canvas_border.shape[0], pen_border[1] + border_bitmap_rows)
-            paste_border_x_end = min(canvas_border.shape[1], pen_border[0] + border_bitmap_width)
-            if paste_border_y_start >= paste_border_y_end or paste_border_x_start >= paste_border_x_end:
-                logger.warning(f"The border of char '{cdpt}' is completely outside the canvas or on the boundary, skipped. Position: x={pen_border[0]}, y={pen_border[1]}, Canvas size: {canvas_border.shape}")
-            else:
-                bitmap_border_slice = bitmap_border[0 : paste_border_y_end-paste_border_y_start,
-                                                    0 : paste_border_x_end-paste_border_x_start]
-                if bitmap_border_slice.size > 0:
-                    target_slice = canvas_border[paste_border_y_start:paste_border_y_end,
-                                                 paste_border_x_start:paste_border_x_end]
-                    if target_slice.shape == bitmap_border_slice.shape:
-                        canvas_border[paste_border_y_start:paste_border_y_end,
-                                      paste_border_x_start:paste_border_x_end] = cv2.add(target_slice, bitmap_border_slice)
-                    else:
-                        logger.warning("Shape mismatch: target={{target_slice.shape}}, source={{bitmap_border_slice.shape}}")
+        stroke_ratio = _resolve_stroke_ratio(config, stroke_width)
+        translated = state['translated']
+        bitmap_border = _bitmap_to_array(get_char_border(translated, font_size, 1, stroke_ratio=stroke_ratio).bitmap)
+        if bitmap_border is not None and state['rot_degree'] == 90:
+            bitmap_border = cv2.rotate(bitmap_border, cv2.ROTATE_90_CLOCKWISE)
+    _paste_glyph_bitmaps(canvas_text, canvas_border, bitmap_char, char_place_x, char_place_y, bitmap_border)
     return char_offset_y  
 
 def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tuple[int, int, int], bg: Optional[Tuple[int, int, int]], line_spacing: int, config=None, region_count: int = 1, stroke_width: float = None, letter_spacing: float = 1.0):
@@ -1459,11 +1523,7 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
     if not text:
         return
 
-    # 初始化 stroke_ratio，避免 UnboundLocalError
-    if stroke_width is None:
-        stroke_ratio = config.render.stroke_width if (config and hasattr(config.render, 'stroke_width')) else 0.07
-    else:
-        stroke_ratio = stroke_width
+    stroke_ratio = _resolve_stroke_ratio(config, stroke_width)
     bg_size = int(max(font_size * stroke_ratio, 1)) if bg is not None else 0
     # line_spacing 是基本间距的倍率
     # 竖排基本间距: 0.2
@@ -1478,54 +1538,55 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
     if not line_height_list:
         return
 
-    max_line_height = max(line_height_list) if line_height_list else 0
+    block_surface_cache = {}
+    line_geometries = [
+        _measure_vertical_line_geometry(
+            font_size,
+            line_text,
+            bg_size,
+            stroke_ratio,
+            letter_spacing,
+            block_surface_cache,
+        )
+        for line_text in line_text_list
+    ]
+    line_widths = [geometry['width'] for geometry in line_geometries]
+    max_render_height = max((geometry['height'] for geometry in line_geometries), default=0)
 
-    # 预先计算每一列的实际最大字符宽度
-    line_widths = []
-    for line_text in line_text_list:
-        max_width = font_size  # 默认使用font_size
-        parts = re.split(r'(<H>.*?</H>)', line_text, flags=re.IGNORECASE | re.DOTALL)
-        for part in parts:
-            if not part:
-                continue
-            is_horizontal_block = part.lower().startswith('<h>') and part.lower().endswith('</h>')
-            if not is_horizontal_block:
-                # 计算竖排字符的实际宽度
-                for c in part:
-                    max_width = max(max_width, _get_vertical_column_char_width(font_size, c))
-        line_widths.append(max_width)
-
-    # 使用实际列宽计算画布大小
-    canvas_x = sum(line_widths) + spacing_x * (len(line_text_list) - 1) + (font_size + bg_size) * 2
-    canvas_y = max_line_height + (font_size + bg_size) * 2
+    content_width = sum(line_widths) + spacing_x * max(0, len(line_widths) - 1)
+    canvas_x = content_width + (font_size + bg_size) * 2
+    canvas_y = max_render_height + (font_size + bg_size) * 2
 
     canvas_text = np.zeros((canvas_y, canvas_x), dtype=np.uint8)
     canvas_border = canvas_text.copy()
-    pen_orig = [canvas_text.shape[1] - (font_size + bg_size), (font_size + bg_size)]
+    content_left = font_size + bg_size
+    current_edge = content_left + content_width
+    column_layouts = []
+    for line_width in line_widths:
+        center_x = current_edge - line_width / 2.0
+        column_layouts.append({
+            'width': line_width,
+            'center_x': center_x,
+            'right_edge': current_edge,
+        })
+        current_edge -= line_width + spacing_x
 
-    # 预先计算每一列的最大字符宽度，防止字符超出列边界
-    line_max_widths = []
-    for line_text in line_text_list:
-        max_char_width = font_size  # 默认使用font_size
-        parts = re.split(r'(<H>.*?</H>)', line_text, flags=re.IGNORECASE | re.DOTALL)
-        for part in parts:
-            if not part:
-                continue
-            is_horizontal_block = part.lower().startswith('<h>') and part.lower().endswith('</h>')
-            if not is_horizontal_block:
-                # 只计算竖排字符的宽度
-                for c in part:
-                    max_char_width = max(max_char_width, _get_vertical_column_char_width(font_size, c))
-        line_max_widths.append(max_char_width)
-
-    for line_idx, (line_text, line_height) in enumerate(zip(line_text_list, line_height_list)):
-        pen_line = pen_orig.copy()
-        # 使用该列的实际最大字符宽度作为列宽
-        line_width = line_max_widths[line_idx]
+    for line_idx, line_text in enumerate(line_text_list):
+        geometry = line_geometries[line_idx]
+        line_width = geometry['width']
+        column_layout = column_layouts[line_idx]
+        pen_line = [
+            int(round(column_layout['right_edge'])),
+            font_size + bg_size,
+        ]
+        render_height = geometry['height']
+        min_y = geometry['min_y']
         if alignment == 'center':
-            pen_line[1] += round((max_line_height - line_height) / 2.0)
+            pen_line[1] += round((max_render_height - render_height) / 2.0) - min_y
         elif alignment == 'right': # In vertical, right means bottom
-            pen_line[1] += max_line_height - line_height
+            pen_line[1] += max_render_height - render_height - min_y
+        else:
+            pen_line[1] += -min_y
 
         parts = re.split(r'(<H>.*?</H>)', line_text, flags=re.IGNORECASE | re.DOTALL)
 
@@ -1539,163 +1600,41 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
                 raw_content = part[3:-4]
                 if not raw_content:
                     continue
-                rotate_90 = should_rotate_horizontal_block_90(raw_content)
-                content = _normalize_horizontal_block_content(raw_content)
-                if not content:
+                surface = _get_vertical_block_surface(
+                    font_size,
+                    raw_content,
+                    bg_size,
+                    stroke_ratio,
+                    letter_spacing,
+                    block_surface_cache,
+                )
+                if surface is None:
+                    logger.warning(f"[RENDER SKIPPED] Horizontal block in vertical text has zero dimensions. Content: {raw_content!r}")
                     continue
 
-                # 字母/数字块旋转90度；符号块保持横排
-                if rotate_90:
-                    # --- RENDER ROTATED BLOCK (字母/数字块旋转90度) ---
-                    # 先横排渲染，再整体旋转，保持字符间距一致
-                    r_font_size = font_size
-                    
-                    # 先在临时画布上横排渲染
-                    r_width = get_string_width(r_font_size, content, letter_spacing=letter_spacing) + r_font_size
-                    r_height = r_font_size * 2
-                    
-                    temp_canvas_text = np.zeros((r_height, r_width), dtype=np.uint8)
-                    temp_canvas_border = np.zeros((r_height, r_width), dtype=np.uint8)
-                    pen_r = [r_font_size // 2, r_font_size]
-                    
-                    for char_r in content:
-                        if char_r == '！': char_r = '!'
-                        elif char_r == '？': char_r = '?'
-                        offset_x = put_char_horizontal(r_font_size, char_r, pen_r, temp_canvas_text, temp_canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio, letter_spacing=letter_spacing)
-                        pen_r[0] += offset_x
-                    
-                    # 旋转90度（顺时针）
-                    rotated_text = cv2.rotate(temp_canvas_text, cv2.ROTATE_90_CLOCKWISE)
-                    rotated_border = cv2.rotate(temp_canvas_border, cv2.ROTATE_90_CLOCKWISE)
-                    
-                    # 裁剪空白
-                    combined_temp = cv2.add(rotated_text, rotated_border)
-                    x, y, w, h_crop = cv2.boundingRect(combined_temp)
-                    if w == 0 or h_crop == 0:
-                        logger.warning(f"[RENDER SKIPPED] Rotated block has zero dimensions. Width: {w}, Height: {h_crop}")
-                        continue
-                    
-                    rotated_block_text = rotated_text[y:y+h_crop, x:x+w]
-                    rotated_block_border = rotated_border[y:y+h_crop, x:x+w]
-                    
-                    rh, rw = rotated_block_text.shape
-                    
-                    # 在竖排行的中心对齐旋转块
-                    line_start_x = pen_line[0] - line_width
-                    paste_x = line_start_x + round((line_width - rw) / 2.0)
-                    paste_y = pen_line[1]
-                    
-                    # 边界检查和调整
-                    canvas_h, canvas_w = canvas_text.shape
-                    if paste_y + rh > canvas_h or paste_x + rw > canvas_w or paste_x < 0 or paste_y < 0:
-                        # 向中心调整
-                        if paste_x < 0:
-                            paste_x = 0
-                        elif paste_x + rw > canvas_w:
-                            paste_x = canvas_w - rw
-                        if paste_y < 0:
-                            paste_y = 0
-                        elif paste_y + rh > canvas_h:
-                            paste_y = canvas_h - rh
-                        
-                        paste_x = max(0, min(paste_x, canvas_w - rw))
-                        paste_y = max(0, min(paste_y, canvas_h - rh))
-                        
-                        if paste_x < 0 or paste_y < 0 or paste_x + rw > canvas_w or paste_y + rh > canvas_h:
-                            logger.warning(f"Rotated block too large for canvas, skipping. Size: {rw}x{rh}, Canvas: {canvas_w}x{canvas_h}")
-                            continue
-                    
-                    # 粘贴到主画布
-                    target_text_roi = canvas_text[paste_y:paste_y+rh, paste_x:paste_x+rw]
-                    canvas_text[paste_y:paste_y+rh, paste_x:paste_x+rw] = np.maximum(target_text_roi, rotated_block_text)
-                    
-                    target_border_roi = canvas_border[paste_y:paste_y+rh, paste_x:paste_x+rw]
-                    canvas_border[paste_y:paste_y+rh, paste_x:paste_x+rw] = np.maximum(target_border_roi, rotated_block_border)
-                    
-                    # 使用旋转后的实际高度
-                    pen_line[1] += rh
-                    # --- END ROTATED BLOCK RENDER ---
-                else:
-                    # --- RENDER HORIZONTAL BLOCK (符号/非字母数字块横排) ---
-                    h_font_size = font_size
+                rh = surface['height']
+                rw = surface['width']
+                line_start_x = int(round(column_layout['center_x'] - line_width / 2.0))
+                paste_x = line_start_x + round((line_width - rw) / 2.0)
+                paste_y = pen_line[1]
+                clamped_pos = _clamp_surface_origin(canvas_text.shape, paste_x, paste_y, rw, rh)
+                if clamped_pos is None:
+                    logger.warning(f"Text block too large for canvas, skipping. Size: {rw}x{rh}, Canvas: {canvas_text.shape[1]}x{canvas_text.shape[0]}")
+                    continue
+                paste_x, paste_y = clamped_pos
 
-                    h_width = get_string_width(h_font_size, content, letter_spacing=letter_spacing) + h_font_size
-                    h_height = h_font_size * 2
+                target_text_roi = canvas_text[paste_y:paste_y+rh, paste_x:paste_x+rw]
+                canvas_text[paste_y:paste_y+rh, paste_x:paste_x+rw] = np.maximum(target_text_roi, surface['text'])
 
-                    temp_canvas_text = np.zeros((h_height, h_width), dtype=np.uint8)
-                    temp_canvas_border = np.zeros((h_height, h_width), dtype=np.uint8)
-                    pen_h = [h_font_size // 2, h_font_size]
+                target_border_roi = canvas_border[paste_y:paste_y+rh, paste_x:paste_x+rw]
+                canvas_border[paste_y:paste_y+rh, paste_x:paste_x+rw] = np.maximum(target_border_roi, surface['border'])
 
-                    for char_h in content:
-                        if char_h == '！': char_h = '!'
-                        elif char_h == '？': char_h = '?'
-                        offset_x = put_char_horizontal(h_font_size, char_h, pen_h, temp_canvas_text, temp_canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio, letter_spacing=letter_spacing)
-                        pen_h[0] += offset_x
-
-                    combined_temp = cv2.add(temp_canvas_text, temp_canvas_border)
-                    x, y, w, h_crop = cv2.boundingRect(combined_temp)
-                    if w == 0 or h_crop == 0:
-                        logger.warning(f"[RENDER SKIPPED] Horizontal block in vertical text has zero dimensions. Width: {w}, Height: {h_crop}")
-                        continue
-
-                    horizontal_block_text = temp_canvas_text[y:y+h_crop, x:x+w]
-                    horizontal_block_border = temp_canvas_border[y:y+h_crop, x:x+w]
-
-                    rh, rw = horizontal_block_text.shape
-
-                    # 修复：在竖排行的中心正确地对齐横排块
-                    # pen_line[0] 是右边界，font_size 是行宽
-                    line_start_x = pen_line[0] - line_width
-                    paste_x = line_start_x + round((line_width - rw) / 2.0)
-
-                    # 横排块的Y位置：直接从pen_line[1]开始，不做baseline对齐
-                    # pen_line[1]是当前渲染位置（前一个字符的底部）
-                    paste_y = pen_line[1]
-
-                    # 智能边界调整：向中心方向移动而不是跳过
-                    canvas_h, canvas_w = canvas_text.shape
-                    if paste_y + rh > canvas_h or paste_x + rw > canvas_w or paste_x < 0 or paste_y < 0:
-                        # 向中心调整位置
-                        # X 方向调整
-                        if paste_x < 0:
-                            paste_x = 0
-                        elif paste_x + rw > canvas_w:
-                            paste_x = canvas_w - rw
-
-                        # Y 方向调整
-                        if paste_y < 0:
-                            paste_y = 0
-                        elif paste_y + rh > canvas_h:
-                            paste_y = canvas_h - rh
-
-                        # 确保调整后仍在边界内
-                        paste_x = max(0, min(paste_x, canvas_w - rw))
-                        paste_y = max(0, min(paste_y, canvas_h - rh))
-
-                        if paste_x < 0 or paste_y < 0 or paste_x + rw > canvas_w or paste_y + rh > canvas_h:
-                            logger.warning(f"Text block too large for canvas, skipping. Size: {rw}x{rh}, Canvas: {canvas_w}x{canvas_h}")
-                            continue
-
-                        logger.info(f"Adjusted text position to fit canvas bounds: ({line_start_x + round((font_size - rw) / 2.0)}, {pen_line[1]}) -> ({paste_x}, {paste_y})")
-
-                    target_text_roi = canvas_text[paste_y:paste_y+rh, paste_x:paste_x+rw]
-                    canvas_text[paste_y:paste_y+rh, paste_x:paste_x+rw] = np.maximum(target_text_roi, horizontal_block_text)
-
-                    target_border_roi = canvas_border[paste_y:paste_y+rh, paste_x:paste_x+rw]
-                    canvas_border[paste_y:paste_y+rh, paste_x:paste_x+rw] = np.maximum(target_border_roi, horizontal_block_border)
-
-                    # 使用实际渲染高度而不是固定的 font_size
-                    # 这确保了渲染输出与 calc_vertical 的高度计算一致
-                    pen_line[1] += rh
-                    # --- END HORIZONTAL BLOCK RENDER ---
+                pen_line[1] += rh
 
             else: # It's a vertical part
-                for char_idx, c in enumerate(part):
+                for c in part:
                     offset_y = put_char_vertical(font_size, c, pen_line, canvas_text, canvas_border, border_size=bg_size, config=config, line_width=line_width, stroke_width=stroke_ratio, letter_spacing=letter_spacing)
                     pen_line[1] += offset_y
-        
-        # 使用实际列宽而不是固定的font_size来计算下一列的位置
-        pen_orig[0] -= spacing_x + line_width
 
     canvas_border = np.clip(canvas_border, 0, 255)
     line_box = add_color(canvas_text, fg, canvas_border, bg)
@@ -1741,18 +1680,10 @@ def get_char_offset_x(font_size: int, cdpt: str, letter_spacing: float = 1.0):
     if cdpt == '＿':
         # Return the width of a full-width space for the placeholder
         return get_char_offset_x(font_size, '　', letter_spacing=letter_spacing)
-
-    c, rot_degree = CJK_Compatibility_Forms_translate(cdpt, 0)
-    glyph = get_char_glyph(c, font_size, 0)
-    bitmap = glyph.bitmap
-    if bitmap.rows * bitmap.width == 0 or len(bitmap.buffer) != bitmap.rows * bitmap.width:
-        char_offset_x = glyph.advance.x >> 6
-    else:
-        char_offset_x = glyph.metrics.horiAdvance >> 6
-    return _scale_advance(char_offset_x, letter_spacing)
+    return _measure_horizontal_text_width(cdpt, font_size, letter_spacing=letter_spacing)
 
 def get_string_width(font_size: int, text: str, letter_spacing: float = 1.0):
-    return sum([get_char_offset_x(font_size, c, letter_spacing=letter_spacing) for c in text])
+    return _measure_horizontal_text_width(text, font_size, letter_spacing=letter_spacing)
 
 def get_char_offset_y(font_size: int, cdpt: str, letter_spacing: float = 1.0):
     """获取单个字符的竖排高度（像素）"""
@@ -1761,27 +1692,8 @@ def get_char_offset_y(font_size: int, cdpt: str, letter_spacing: float = 1.0):
 
     cdpt_trans, _ = CJK_Compatibility_Forms_translate(cdpt, 1)
     slot = get_char_glyph(cdpt_trans, font_size, 1)
-
-    char_offset_y = font_size  # 默认值
-
-    if hasattr(slot, 'metrics') and slot.metrics:
-        if hasattr(slot.metrics, 'vertAdvance') and slot.metrics.vertAdvance:
-            char_offset_y = slot.metrics.vertAdvance >> 6
-        elif hasattr(slot.metrics, 'height') and slot.metrics.height:
-            char_offset_y = slot.metrics.height >> 6
-
-    if _is_vertical_ellipsis_char(cdpt_trans):
-        bitmap_rows = slot.bitmap.rows if hasattr(slot, 'bitmap') and slot.bitmap else 0
-        bitmap_char = None
-        if slot.bitmap and bitmap_rows > 0 and slot.bitmap.width > 0 and len(slot.bitmap.buffer) == bitmap_rows * slot.bitmap.width:
-            bitmap_char = np.array(slot.bitmap.buffer, dtype=np.uint8).reshape((bitmap_rows, slot.bitmap.width))
-        char_offset_y = _smart_vertical_ellipsis_advance(slot, font_size, bitmap_rows, bitmap_char)
-
-    if char_offset_y == font_size and hasattr(slot, 'advance') and slot.advance:
-        if hasattr(slot.advance, 'y') and slot.advance.y:
-            char_offset_y = slot.advance.y >> 6
-
-    return _scale_advance(char_offset_y, letter_spacing)
+    advance_y = _resolve_vertical_char_offset(slot, cdpt_trans, font_size, letter_spacing=letter_spacing)
+    return _resolve_vertical_slot_height(font_size, cdpt_trans, advance_y)
 
 def get_string_height(font_size: int, text: str, letter_spacing: float = 1.0):
     """获取字符串的竖排总高度（像素），考虑<H>横排块"""
@@ -2128,116 +2040,23 @@ def put_char_horizontal(font_size: int, cdpt: str, pen_l: Tuple[int, int], canva
         # For the placeholder, just advance the pen and do nothing else.
         return get_char_offset_x(font_size, '＿', letter_spacing=letter_spacing)
 
-    pen = list(pen_l)
-    cdpt, rot_degree = CJK_Compatibility_Forms_translate(cdpt, 0)
-    slot = get_char_glyph(cdpt, font_size, 0)
-    bitmap = slot.bitmap
-    
-    # 统一的字体度量获取逻辑，优先使用metrics.horiAdvance
-    char_offset_x = font_size  # 默认值
-    
-    if hasattr(slot, 'metrics') and slot.metrics:
-        if hasattr(slot.metrics, 'horiAdvance') and slot.metrics.horiAdvance:
-            char_offset_x = slot.metrics.horiAdvance >> 6
-        elif hasattr(slot.metrics, 'width') and slot.metrics.width:
-            # 使用字符宽度作为备选
-            char_offset_x = slot.metrics.width >> 6
-    
-    # 如果metrics不可用，尝试使用advance
-    if char_offset_x == font_size and hasattr(slot, 'advance') and slot.advance:
-        if hasattr(slot.advance, 'x') and slot.advance.x:
-            char_offset_x = slot.advance.x >> 6
-    
-    # 最后的fallback：使用bitmap宽度
-    if char_offset_x == font_size and bitmap.width > 0:
-        if hasattr(slot, 'bitmap_left'):
-            char_offset_x = slot.bitmap_left + bitmap.width
-        else:
-            char_offset_x = bitmap.width
-    char_offset_x = _scale_advance(char_offset_x, letter_spacing)
-
-    if bitmap.rows * bitmap.width == 0 or len(bitmap.buffer) != bitmap.rows * bitmap.width:
+    cdpt, _ = CJK_Compatibility_Forms_translate(cdpt, 0)
+    char_offset_x = get_char_offset_x(font_size, cdpt, letter_spacing=letter_spacing)
+    stroke_ratio = _resolve_stroke_ratio(config, stroke_width)
+    surface = _render_horizontal_line_surface(
+        cdpt,
+        font_size,
+        border_size,
+        stroke_ratio=stroke_ratio,
+        reversed_direction=False,
+        letter_spacing=letter_spacing,
+    )
+    if surface is None:
         return char_offset_x
-    bitmap_char = np.array(bitmap.buffer, dtype=np.uint8).reshape((bitmap.rows, bitmap.width))
-    char_place_x = pen[0] + slot.bitmap_left
-    char_place_y = pen[1] - slot.bitmap_top
-    paste_y_start = max(0, char_place_y)
-    paste_x_start = max(0, char_place_x)
-    paste_y_end = min(canvas_text.shape[0], char_place_y + bitmap.rows)
-    paste_x_end = min(canvas_text.shape[1], char_place_x + bitmap.width)
-    bitmap_slice_y_start = paste_y_start - char_place_y
-    bitmap_slice_x_start = paste_x_start - char_place_x
-    bitmap_slice_y_end = bitmap_slice_y_start + (paste_y_end - paste_y_start)
-    bitmap_slice_x_end = bitmap_slice_x_start + (paste_x_end - paste_x_start)
-    bitmap_char_slice = bitmap_char[
-        bitmap_slice_y_start:bitmap_slice_y_end,
-        bitmap_slice_x_start:bitmap_slice_x_end
-    ]
-    if (bitmap_char_slice.size > 0 and 
-        bitmap_char_slice.shape == (paste_y_end - paste_y_start,
-                                   paste_x_end - paste_x_start)):
-        canvas_text[paste_y_start:paste_y_end, 
-                    paste_x_start:paste_x_end] = bitmap_char_slice
-    if border_size > 0:
-        glyph_border = get_char_border(cdpt, font_size, 0)
-        stroker = freetype.Stroker()
-        # Use passed stroke_width, fallback to config or default
-        if stroke_width is None:
-            stroke_ratio = config.render.stroke_width if (config and hasattr(config.render, 'stroke_width')) else 0.07
-        else:
-            stroke_ratio = stroke_width
-        stroke_radius = 64 * max(int(stroke_ratio * font_size), 1)
-        stroker.set(stroke_radius, 
-                   freetype.FT_STROKER_LINEJOIN_ROUND,
-                   freetype.FT_STROKER_LINECAP_ROUND,
-                   0)
-        glyph_border.stroke(stroker, destroy=True)
-        blyph = glyph_border.to_bitmap(freetype.FT_RENDER_MODE_NORMAL, 
-                                      freetype.Vector(0, 0), True)
-        bitmap_b = blyph.bitmap
-        border_bitmap_rows = bitmap_b.rows
-        border_bitmap_width = bitmap_b.width
-        if (border_bitmap_rows * border_bitmap_width > 0 and 
-            len(bitmap_b.buffer) == border_bitmap_rows * border_bitmap_width):
-            bitmap_border = np.array(bitmap_b.buffer, dtype=np.uint8
-                                   ).reshape((border_bitmap_rows, border_bitmap_width))
-            char_bitmap_rows = bitmap.rows
-            char_bitmap_width = bitmap.width
-            
-            # 改进的边框位置计算：直接基于字符位置和尺寸差异
-            # 避免浮点累积误差
-            size_diff_x = border_bitmap_width - char_bitmap_width
-            size_diff_y = border_bitmap_rows - char_bitmap_rows
-            
-            # 边框应该围绕字符居中，所以偏移是尺寸差的一半
-            pen_border_x = char_place_x - round(size_diff_x / 2.0)
-            pen_border_y = char_place_y - round(size_diff_y / 2.0)
-            paste_border_y_start = max(0, pen_border_y)
-            paste_border_x_start = max(0, pen_border_x)
-            paste_border_y_end = min(canvas_border.shape[0], pen_border_y + border_bitmap_rows)
-            paste_border_x_end = min(canvas_border.shape[1], pen_border_x + border_bitmap_width)
-            border_slice_y_start = paste_border_y_start - pen_border_y
-            border_slice_x_start = paste_border_x_start - pen_border_x
-            border_slice_y_end = border_slice_y_start + (paste_border_y_end - paste_border_y_start)
-            border_slice_x_end = border_slice_x_start + (paste_border_x_end - paste_border_x_start)
-            bitmap_border_slice = bitmap_border[
-                border_slice_y_start:border_slice_y_end,
-                border_slice_x_start:border_slice_x_end
-            ]
-            if (bitmap_border_slice.size > 0 and 
-                bitmap_border_slice.shape == (paste_border_y_end - paste_border_y_start,
-                                            paste_border_x_end - paste_border_x_start)):
-                target_slice = canvas_border[
-                    paste_border_y_start:paste_border_y_end,
-                    paste_border_x_start:paste_border_x_end
-                ]
-                if target_slice.shape == bitmap_border_slice.shape:
-                    canvas_border[paste_border_y_start:paste_border_y_end,
-                                paste_border_x_start:paste_border_x_end] = cv2.add(
-                        target_slice, bitmap_border_slice)
-                else:
-                    print("[Error] Shape mismatch during border paste: "
-                         f"target={target_slice.shape}, source={bitmap_border_slice.shape}")
+    pen = list(pen_l)
+    paste_x = pen[0] + surface['left_rel']
+    paste_y = pen[1] + surface['top_rel']
+    _paste_surface(canvas_text, canvas_border, surface, paste_x, paste_y)
     return char_offset_x
 
 def is_cjk_lang(lang: str):
@@ -2257,11 +2076,7 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
     if config:
         layout_mode = config.render.layout_mode
 
-    # 初始化 stroke_ratio，避免 UnboundLocalError
-    if stroke_width is None:
-        stroke_ratio = config.render.stroke_width if (config and hasattr(config.render, 'stroke_width')) else 0.07
-    else:
-        stroke_ratio = stroke_width
+    stroke_ratio = _resolve_stroke_ratio(config, stroke_width)
 
     # 简化逻辑：统一处理BR标记，有BR就按它换行，没有就不换行
     text = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text, flags=re.IGNORECASE)
@@ -2281,33 +2096,55 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
     else:
         line_text_list, line_width_list = calc_horizontal(font_size, text, width, height, lang, hyphenate, letter_spacing=letter_spacing)
 
+    line_surfaces = []
     line_visual_extents_x = []
     line_visual_widths = []
-    for line_text in line_text_list:
-        line_left, line_right = _measure_horizontal_line_visual_extents(
+    line_frame_metrics = []
+    logical_line_tops = []
+    logical_cursor_y = 0.0
+    min_ink_top = 0.0
+    max_ink_bottom = 0.0
+    for line_idx, line_text in enumerate(line_text_list):
+        surface = _render_horizontal_line_surface(
             line_text,
             font_size,
-            border_size=bg_size,
-            config=config,
+            bg_size,
             stroke_ratio=stroke_ratio,
             reversed_direction=reversed_direction,
-            letter_spacing=letter_spacing
+            letter_spacing=letter_spacing,
         )
+        metrics = _get_horizontal_line_frame_metrics(line_text, font_size, letter_spacing=letter_spacing)
+        line_surfaces.append(surface)
+        line_frame_metrics.append(metrics)
+        logical_line_tops.append(logical_cursor_y)
+        if surface is not None:
+            line_left = surface['left_rel']
+            line_right = surface['right_rel']
+            min_ink_top = min(min_ink_top, logical_cursor_y + surface['ink_top'])
+            max_ink_bottom = max(max_ink_bottom, logical_cursor_y + surface['ink_bottom'])
+        else:
+            line_left, line_right = 0.0, 0.0
         line_visual_extents_x.append((line_left, line_right))
         line_visual_widths.append(max(0, line_right - line_left))
+        logical_cursor_y += metrics['height']
+        if line_idx < len(line_text_list) - 1:
+            logical_cursor_y += spacing_y
     max_visual_width = max(line_visual_widths) if line_visual_widths else 0
+    logical_total_height = logical_cursor_y
+    extra_top = max(0.0, -min_ink_top)
+    extra_bottom = max(0.0, max_ink_bottom - logical_total_height)
 
-    canvas_w = max(max(line_width_list), max_visual_width) + (font_size + bg_size) * 2
-    canvas_h = font_size * len(line_width_list) + spacing_y * (len(line_width_list) - 1) + (font_size + bg_size) * 2
+    canvas_w = int(math.ceil(max(max(line_width_list), max_visual_width) + (font_size + bg_size) * 2))
+    canvas_h = int(math.ceil(logical_total_height + extra_top + extra_bottom + bg_size * 2))
 
     canvas_text = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
     canvas_border = canvas_text.copy()
-    pen_orig = [font_size + bg_size, font_size + bg_size]
+    pen_orig = [font_size + bg_size, bg_size + extra_top]
 
     if reversed_direction:
         pen_orig[0] = canvas_w - bg_size - 10
 
-    for line_idx, (line_text, line_width) in enumerate(zip(line_text_list, line_width_list)):
+    for line_idx, line_text in enumerate(line_text_list):
         pen_line = pen_orig.copy()
         line_left, line_right = line_visual_extents_x[line_idx]
         line_visual_width = max(0, line_right - line_left)
@@ -2333,33 +2170,12 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
             target_right = target_left + line_visual_width
             pen_line[0] = round(target_right - line_right)
 
-        if not reversed_direction and HAS_UHARFBUZZ and contains_thai_text(line_text):
-            shaped_line = _render_thai_shaped_line(
-                line_text,
-                font_size,
-                border_size=bg_size,
-                config=config,
-                stroke_ratio=stroke_ratio,
-                letter_spacing=letter_spacing,
-            )
-            if shaped_line is not None:
-                paste_x = pen_line[0] + shaped_line['left_rel']
-                paste_y = pen_line[1] + shaped_line['top_rel']
-                _paste_bitmap(canvas_text, shaped_line['text'], paste_x, paste_y, mode='max')
-                _paste_bitmap(canvas_border, shaped_line['border'], paste_x, paste_y, mode='add')
-            else:
-                for char_idx, c in enumerate(line_text):
-                    offset_x = put_char_horizontal(font_size, c, pen_line, canvas_text, canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio, letter_spacing=letter_spacing)
-                    pen_line[0] += offset_x
-        else:
-            for char_idx, c in enumerate(line_text):
-                if reversed_direction:
-                    offset_x = get_char_offset_x(font_size, c, letter_spacing=letter_spacing)
-                    pen_line[0] -= offset_x
-                offset_x = put_char_horizontal(font_size, c, pen_line, canvas_text, canvas_border, border_size=bg_size, config=config, stroke_width=stroke_ratio, letter_spacing=letter_spacing)
-                if not reversed_direction:
-                    pen_line[0] += offset_x
-        pen_orig[1] += spacing_y + font_size
+        surface = line_surfaces[line_idx]
+        if surface is not None:
+            paste_x = pen_line[0] + surface['left_rel']
+            baseline_y = pen_line[1] + logical_line_tops[line_idx] + line_frame_metrics[line_idx]['ascent']
+            paste_y = baseline_y + surface['top_rel']
+            _paste_surface(canvas_text, canvas_border, surface, paste_x, paste_y)
 
     canvas_border = np.clip(canvas_border, 0, 255)
     line_box = add_color(canvas_text, fg, canvas_border, bg)
@@ -2373,11 +2189,3 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
     result = line_box[y:y+h, x:x+w]
     return result
 
-def test():
-    import logging
-    logger = logging.getLogger('manga_translator')
-    canvas = put_text_horizontal(64, 1.0, '因为不同‼ [这"真的是普]通的》肉！那个"姑娘"的恶作剧！是吗？咲夜⁉', 400, (0, 0, 0), (255, 128, 128))
-    imwrite_unicode('text_render_combined.png', canvas, logger)
-
-if __name__ == '__main__':
-    test()

@@ -68,10 +68,18 @@ def apply_font_for_render(font_path: str) -> str:
         return ''
     return resolved_font_path
 
-def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transform, render_params: dict, pure_zoom: float = 1.0, total_regions: int = 1):
+
+def _rgba_image_to_qimage(rgba_image: np.ndarray) -> QImage:
+    h, w, _ = rgba_image.shape
+    bgra_image = rgba_image.copy()
+    bgra_image[:, :, [0, 2]] = bgra_image[:, :, [2, 0]]
+    return QImage(bgra_image.data, w, h, w * 4, QImage.Format.Format_ARGB32).copy()
+
+
+def render_text_image_for_region(text_block: TextBlock, dst_points: np.ndarray, transform, render_params: dict, pure_zoom: float = 1.0, total_regions: int = 1):
     """
     为单个区域渲染文本的核心函数
-    返回一个包含 (QPixmap, QPointF) 的元组用于绘制，或者在失败时返回 None
+    返回一个包含 (QImage, QPointF) 的元组，适合离屏/线程内处理。
     """
     original_translation = text_block.translation
     try:
@@ -158,7 +166,7 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
             auto_rotate_symbols=bool(render_params.get('auto_rotate_symbols')),
         )
 
-        # 使用 freetype 渲染器（稳定可靠）
+        # 使用 Qt 离屏渲染器
         if text_block.horizontal:
             rendered_surface = text_render.put_text_horizontal(
                 font_size, 
@@ -268,20 +276,30 @@ def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transf
 
         warped_image = cv2.warpPerspective(box, matrix, (w_s, h_s), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0,0))
 
-        # --- 5. 转换为QPixmap并返回绘制信息 ---
+        # --- 5. 转换为QImage并返回绘制信息 ---
         h, w, ch = warped_image.shape
         if ch == 4:
-            # Convert RGBA to BGRA for QImage Format_ARGB32
-            bgra_image = warped_image.copy()
-            bgra_image[:, :, [0, 2]] = bgra_image[:, :, [2, 0]]  # Swap R and B channels
-            # 【关键修复】使用.copy()确保QImage拥有自己的内存，防止numpy数组被回收后崩溃
-            final_image = QImage(bgra_image.data, w, h, w * 4, QImage.Format.Format_ARGB32).copy()
-            final_pixmap = QPixmap.fromImage(final_image)
-            # 返回pixmap和它在屏幕(视图)上的绘制位置
-            return (final_pixmap, QPointF(x_s, y_s))
+            final_image = _rgba_image_to_qimage(warped_image)
+            return (final_image, QPointF(x_s, y_s))
 
     except Exception as e:
         logger.debug(f"Error during backend text rendering: {e}")
         return None
     finally:
         text_block.translation = original_translation
+
+
+def render_text_for_region(text_block: TextBlock, dst_points: np.ndarray, transform, render_params: dict, pure_zoom: float = 1.0, total_regions: int = 1):
+    image_result = render_text_image_for_region(
+        text_block,
+        dst_points,
+        transform,
+        render_params,
+        pure_zoom=pure_zoom,
+        total_regions=total_regions,
+    )
+    if image_result is None:
+        return None
+
+    final_image, pos = image_result
+    return (QPixmap.fromImage(final_image), pos)

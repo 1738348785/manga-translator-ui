@@ -57,7 +57,7 @@ def hex2rgb(h):
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
 class Renderer(str, Enum):
-    default = "default"  # freetype 渲染器
+    default = "default"  # Qt 离屏渲染器
     manga2Eng = "manga2eng"
     manga2EngPillow = "manga2eng_pillow"
     openai_renderer = "openai_renderer"

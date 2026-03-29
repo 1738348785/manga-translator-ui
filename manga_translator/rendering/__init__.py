@@ -15,7 +15,7 @@ from tqdm import tqdm
 from ..config import Config, Renderer
 from ..server_paths import normalize_server_resource_path
 
-# 只使用 freetype 渲染器（稳定可靠）
+# 只使用 Qt 离屏渲染器
 from ..utils import (
     BASE_PATH,
     TextBlock,
@@ -2228,7 +2228,7 @@ def render(
     if config:
         config._current_region = region
 
-    # 使用 freetype 渲染器（稳定可靠）
+    # 使用 Qt 离屏渲染器
     # 检测是否需要使用高质量渲染（针对低分辨率优化）
     use_hq_render = text_render_hq.should_use_hq_rendering(
         region.font_size, 

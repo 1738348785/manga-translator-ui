@@ -527,17 +527,8 @@ def _is_thai_lang(lang: str) -> bool:
 def _measure_horizontal_line_width(font_size: int, line_text: str, letter_spacing: float = 1.0) -> int:
     if not line_text:
         return 0
-    if hasattr(text_render, '_measure_horizontal_line_visual_extents') and text_render.contains_thai_text(line_text):
-        left, right = text_render._measure_horizontal_line_visual_extents(
-            line_text,
-            font_size,
-            border_size=0,
-            config=None,
-            stroke_ratio=0.0,
-            reversed_direction=False,
-            letter_spacing=letter_spacing,
-        )
-        return max(0, int(round(right - left)))
+    if hasattr(text_render, '_measure_horizontal_text_width'):
+        return text_render._measure_horizontal_text_width(line_text, font_size, letter_spacing=letter_spacing)
     return get_string_width(font_size, line_text, letter_spacing=letter_spacing)
 
 def _tokenize_thai_words(text: str) -> List[str]:
