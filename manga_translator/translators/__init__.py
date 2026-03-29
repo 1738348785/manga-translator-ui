@@ -12,16 +12,12 @@ from .openai import OpenAITranslator
 from .openai_hq import OpenAIHighQualityTranslator
 from .original import OriginalTranslator
 from .sakura import SakuraTranslator
-from .vertex import VertexTranslator
-from .vertex_hq import VertexHighQualityTranslator
 
 GPT_TRANSLATORS = {
     Translator.openai: OpenAITranslator,
     Translator.openai_hq: OpenAIHighQualityTranslator,
     Translator.gemini: GeminiTranslator,
     Translator.gemini_hq: GeminiHighQualityTranslator,
-    Translator.vertex: VertexTranslator,
-    Translator.vertex_hq: VertexHighQualityTranslator,
 }
 
 TRANSLATORS = {
@@ -74,7 +70,7 @@ async def dispatch(chain: TranslatorChain, queries: List[str], config: Config, u
     for key, tgt_lang in chain.chain:
         translator = get_translator(key)
         translator.parse_args(config)
-        if key.value in ["gemini_hq", "openai_hq", "vertex_hq"]:
+        if key.value in ["gemini_hq", "openai_hq"]:
             queries = await translator.translate('auto', tgt_lang, queries, ctx=args)
         else:
             # 传递ctx参数（用于AI断句）

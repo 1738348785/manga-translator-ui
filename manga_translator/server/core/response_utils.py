@@ -175,9 +175,9 @@ def _apply_env_vars_to_config(
     将环境变量映射到 config.translator 的用户级字段
     
     支持的环境变量:
-    - OPENAI_API_KEY, GEMINI_API_KEY, VERTEX_API_KEY -> user_api_key
+    - OPENAI_API_KEY, GEMINI_API_KEY -> user_api_key
     - OPENAI_API_BASE, GEMINI_API_BASE -> user_api_base
-    - OPENAI_MODEL, GEMINI_MODEL, VERTEX_MODEL -> user_api_model
+    - OPENAI_MODEL, GEMINI_MODEL -> user_api_model
     
     注意：预设可能使用 OPENAI_* 变量来配置第三方 API（如 Gemini 通过 OpenAI 兼容接口）
     所以我们统一将这些变量映射到 user_api_* 字段，翻译器会根据自己的类型使用这些值
@@ -211,16 +211,6 @@ def _apply_env_vars_to_config(
             "api_key": ["GEMINI_API_KEY"],
             "api_base": ["GEMINI_API_BASE"],
             "model": ["GEMINI_MODEL"],
-        },
-        "vertex": {
-            "api_key": ["VERTEX_API_KEY"],
-            "api_base": [],
-            "model": ["VERTEX_MODEL"],
-        },
-        "vertex_hq": {
-            "api_key": ["VERTEX_API_KEY"],
-            "api_base": [],
-            "model": ["VERTEX_MODEL"],
         },
     }
     priority = provider_priority.get(translator_name)

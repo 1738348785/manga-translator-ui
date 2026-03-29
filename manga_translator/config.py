@@ -123,8 +123,6 @@ class Translator(str, Enum):
     openai_hq = "openai_hq"
     gemini = "gemini"
     gemini_hq = "gemini_hq"
-    vertex = "vertex"
-    vertex_hq = "vertex_hq"
     sakura = "sakura"
     none = "none"
     original = "original"
@@ -204,7 +202,7 @@ class RenderConfig(BaseModel):
     paste_mask_dilation_pixels: int = 10
     """Mask dilation size in pixels for paste mode. Default is 10. Set to 0 to disable dilation. Actual dilation = pixels // 3 iterations with 3x3 kernel."""
     ai_renderer_concurrency: int = 1
-    """Maximum concurrent API requests for OpenAI Renderer and Gemini Renderer."""
+    """Maximum concurrent API requests for OpenAI/Gemini/Vertex renderers."""
     _font_color_fg = None
     _font_color_bg = None
 

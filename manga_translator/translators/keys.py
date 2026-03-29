@@ -35,11 +35,6 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_API_BASE = os.getenv('GEMINI_API_BASE', 'https://generativelanguage.googleapis.com')
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-1.5-flash-002')
 
-# Vertex
-VERTEX_API_KEY = os.getenv('VERTEX_API_KEY', '')
-VERTEX_API_BASE = 'https://generativelanguage.googleapis.com'
-VERTEX_MODEL = os.getenv('VERTEX_MODEL', 'gemini-1.5-flash-002')
-
 # deepseek
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
 DEEPSEEK_API_BASE  = os.getenv('DEEPSEEK_API_BASE', 'https://api.deepseek.com')

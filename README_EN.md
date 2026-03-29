@@ -66,7 +66,7 @@ The English companion versions of the documents below are being added one by one
 
 - 🔍 **Smart Text Detection** - Automatically detects text regions in manga pages
 - 📝 **Multilingual OCR** - Supports Japanese, Chinese, English, and more
-- 🌐 **Multiple Translation Engines** - `OpenAI`, `Google Gemini`, `OpenAI High Quality`, `Gemini High Quality`, and `Sakura`
+- 🌐 **Multiple Translation Engines** - `OpenAI`, `Google Gemini`, `Vertex`, `OpenAI High Quality`, `Gemini High Quality`, `Vertex High Quality`, and `Sakura`
 - 🎯 **High-Quality Translation** - Supports multimodal AI translation with GPT-4o-class and Gemini-class models
 - 📚 **Automatic Glossary Extraction** - AI can collect new proper nouns and terms to keep translations consistent
 - 🤖 **AI Line Breaking** - Improves readability by automatically optimizing line breaks
@@ -286,6 +286,7 @@ Basic steps:
 4. Add images
 5. Choose a translator
    - Recommended for first use: `OpenAI High Quality` or `Gemini High Quality`
+   - If you want a separate Google-official key/model set, `Vertex High Quality` is also available
    - These require API keys. See the [API Configuration Guide](doc/en/API_CONFIG.md)
 6. Start translation
 
@@ -348,12 +349,21 @@ The current Qt UI also includes additional workflow entries such as `Translate J
 - **OpenAI** - uses GPT-family models
 - **Google Gemini** - uses Gemini-family models
 - **Sakura** - optimized for Japanese
+- Google Cloud or Vertex-related API keys can also be entered directly in the `Gemini` fields; keep the default official `Base URL`
 
 ### High-Quality Translators (Recommended)
 
 - **OpenAI High Quality** - uses multimodal GPT-4o-class models
 - **Gemini High Quality** - uses multimodal Gemini models
 - 📸 Uses image context together with text, which usually gives more accurate translations
+
+### AI OCR / Colorization / Rendering (Optional)
+
+- **AI OCR** - supports `openai_ocr` and `gemini_ocr`
+- **AI Colorization** - supports `openai_colorizer` and `gemini_colorizer`
+- **AI Rendering** - supports `openai_renderer` and `gemini_renderer`
+- In the desktop UI, configure them under `API Management` -> `OCR` / `Colorization` / `Render`
+- The web admin UI exposes matching Gemini / OpenAI API-key groups as well. Google Cloud or Vertex-related API keys can also use the Gemini group directly; keep the default official `Base URL`. See the [API Configuration Guide](doc/en/API_CONFIG.md) and [Settings Reference](doc/en/SETTINGS.md)
 
 **Full Settings Reference** → [doc/en/SETTINGS.md](doc/en/SETTINGS.md)
 

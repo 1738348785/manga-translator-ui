@@ -396,14 +396,7 @@ services:
 | `GEMINI_MODEL` | Gemini model name |
 | `GEMINI_API_BASE` | Gemini API base URL |
 
-**Vertex family**
-
-| Variable | Description |
-|--------|------|
-| `VERTEX_API_KEY` | Vertex API key, used by `vertex` and `vertex_hq` translators |
-| `VERTEX_MODEL` | Vertex model name |
-
-> Note: the Vertex path always uses the fixed official Gemini host internally. There is no public `VERTEX_API_BASE` setting.
+> Note: Google Cloud or Vertex-related API keys can also be entered directly in `GEMINI_API_KEY`. Leave `GEMINI_API_BASE` empty for the default official host, or keep `https://generativelanguage.googleapis.com`.
 
 **Other commercial providers**
 
@@ -577,7 +570,7 @@ If you are using the CPU package or a machine without a compatible GPU:
 If you want online translation:
 
 1. Open `API Management`
-2. Fill the required key such as `OpenAI API Key`, `Gemini API Key`, or `Vertex API Key`
+2. Fill the required key such as `OpenAI API Key` or `Gemini API Key`
 3. Return to `Translation Interface`
 4. Choose `Translator`
 5. Choose `Target Language`
@@ -586,7 +579,6 @@ Recommended first choices:
 
 - `OpenAI High Quality`
 - `Gemini High Quality`
-- `Vertex High Quality` if you want a separate `VERTEX_*` credential set for the official Gemini host
 
 ### 5. Add images
 

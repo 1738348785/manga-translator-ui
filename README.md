@@ -326,14 +326,20 @@ python -m manga_translator --help
 ### 在线翻译器（需要 API Key）
 - **OpenAI** - 使用 GPT 系列模型
 - **Gemini** - 使用 Google Gemini 模型
-- **Vertex** - 使用固定 Google 官方 Gemini host，独立读取 `VERTEX_API_KEY` / `VERTEX_MODEL`
 - **Sakura** - 专门针对日语优化的翻译模型
+- Google Cloud / Vertex 相关 API Key 也直接填写到 `Gemini` 配置即可；`Base URL` 保持默认官方地址，无需修改
 
 ### 高质量翻译器（推荐）
 - **高质量翻译 OpenAI** - 使用 GPT-4o 多模态模型
 - **高质量翻译 Gemini** - 使用 Gemini 多模态模型
-- **高质量翻译 Vertex** - 使用固定 Google 官方 Gemini host 的多模态路径
 - 📸 结合图片上下文，翻译更准确
+
+### AI 识别 / 上色 / 渲染（可选）
+- **AI OCR** - 支持 `openai_ocr`、`gemini_ocr`
+- **AI 上色** - 支持 `openai_colorizer`、`gemini_colorizer`
+- **AI 渲染** - 支持 `openai_renderer`、`gemini_renderer`
+- 桌面端可在 `API 管理` 的 `OCR` / `上色` / `渲染` 标签分别配置
+- Web 管理端也同步提供对应的 Gemini / OpenAI API Key 分组；Google Cloud / Vertex 相关 API Key 同样直接填 Gemini 分组即可，`Base URL` 无需修改，详情见 [API 配置教程](doc/API_CONFIG.md) 与 [设置说明](doc/SETTINGS.md)
 
 **完整设置说明** → [doc/SETTINGS.md](doc/SETTINGS.md)
 

@@ -4,8 +4,6 @@
 
 ## ✨ 新功能
 
-- 新增 `vertex` / `vertex_hq` 翻译器，独立读取 `VERTEX_API_KEY` 与 `VERTEX_MODEL`；`VERTEX_API_BASE` 固定使用 Google 官方 Gemini 地址，不再暴露可配置项。
-- Web 端重新开放并接通 `vertex` / `vertex_hq`、`openai_ocr` / `gemini_ocr`、OpenAI / Gemini 上色器、OpenAI / Gemini 渲染器，相关选项与权限过滤现在在网页端真正生效。
 - 权限系统扩展到翻译器、OCR、上色器、渲染器四类能力；用户组/用户权限与权限编辑器现在都可以分别管理这些能力。
 - 权限编辑器新增 API Key 策略可视化项：支持配置“允许用户在主页编辑 API Keys”“允许使用服务器默认 API Keys”“强制用户提供 API Keys 或预设”“允许把用户填写的 API Keys 保存到服务器”等策略。
 - Web 管理后台与用户主页的 API Key 管理按 Qt 界面思路重做，统一分为“翻译 / OCR / 上色 / 渲染”四组，并加入 Vertex 分组。
@@ -43,7 +41,6 @@
 ## 🔧 优化
 
 - Web 用户 API Key 管理与预设逻辑改为服务端合成，支持“用户填写覆盖预设，预设再覆盖服务器默认”的行为，同时保留服务端统一校验与拒绝策略。
-- `vertex` / `vertex_hq` 继续复用 Gemini 实现，但参数组、默认地址与文档说明完全独立，便于和 `GEMINI_*` 分开管理。
 - Web 端配置选项、下拉项与后端可用能力列表统一按权限动态过滤，用户只能看到自己当前被允许使用的翻译器 / OCR / 上色器 / 渲染器。
 - 桌面端 API 管理、API 测试逻辑与多语言文案同步补齐 Vertex、OCR、上色、渲染相关参数，和 Web 端参数体系保持一致。
 - Web 服务内部数据结构收口：`admin_config.json` 与 `user_resources/` 现统一纳入 `manga_translator/server/data`，并在启动时自动迁移旧目录布局。

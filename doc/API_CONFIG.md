@@ -11,7 +11,9 @@
 - [硅基流动 API 配置](#硅基流动-api-配置)
 - [DeepSeek API 配置](#deepseek-api-配置)
 - [Google Gemini API 配置](#google-gemini-api-配置)
-- [Vertex API 配置](#vertex-api-配置)
+- [API OCR 配置（OpenAI OCR / Gemini OCR）](#api-ocr-配置openai-ocr--gemini-ocr)
+- [API 上色配置（OpenAI Colorizer / Gemini Colorizer）](#api-上色配置openai-colorizer--gemini-colorizer)
+- [API 渲染配置（OpenAI Renderer / Gemini Renderer）](#api-渲染配置openai-renderer--gemini-renderer)
 - [常见问题](#常见问题)
 
 ---
@@ -55,13 +57,13 @@
 
 程序提供了两类翻译器，它们的区别只是**接口不同**：
 
-#### 普通翻译器（OpenAI / Gemini / Vertex）
+#### 普通翻译器（OpenAI / Gemini）
 - 使用纯文本 API
 - 只发送识别出的文字
 - 翻译速度快，消耗少
 - 适合简单场景
 
-#### 高质量翻译器（高质量翻译 OpenAI / 高质量翻译 Gemini / 高质量翻译 Vertex）
+#### 高质量翻译器（高质量翻译 OpenAI / 高质量翻译 Gemini）
 - 使用多模态 API（支持图片）
 - 发送图片 + 文字
 - AI 可以"看到"图片，理解场景
@@ -91,10 +93,9 @@ OpenAI 翻译器**几乎支持市面上所有模型**，因为几乎所有的 AI
   - 程序会自动添加 `/v1beta`
 - **使用 AI Studio 官方 key**：无需填写 API 地址（自动使用默认地址）
 
-#### Vertex 接口
-- **固定官方地址**：程序内部写死为 `https://generativelanguage.googleapis.com`
-- **不提供 `VERTEX_API_BASE` 配置项**：只需要填写 `VERTEX_API_KEY` 和 `VERTEX_MODEL`
-- **适用场景**：想和 Gemini 分开管理一套 Google 官方 Key / 模型配置时使用
+#### Google Cloud / Vertex 相关 Key 说明
+- Google Cloud / Vertex 相关 API Key 也直接填写到 Gemini 配置即可
+- `Base URL` 留空使用默认值，或填写 `https://generativelanguage.googleapis.com` 都可以，无需改成其他地址
 
 ---
 
@@ -190,44 +191,17 @@ Google Gemini 是 Google 最新的多模态 AI 模型，性能强劲。
 3. 在"高级设置"中填写：
    - **API Key**：你的 Gemini API Key
    - **Base URL**：无需填写（自动使用默认地址）
-   - **模型**：
-      - `gemini-2.5-pro`：断句稳定，质量最高 ⭐ 推荐
-      - `gemini-2.5-flash`：速度快，价格便宜
-
----
-
-## Vertex API 配置
-
-Vertex 系列复用 Google 官方 Gemini 接口，但使用独立的 `VERTEX_*` 参数，适合把另一套 Google 官方 Key / 模型与 Gemini 配置分开管理。
-
-> 💡 **说明**：
-> - `vertex` / `vertex_hq` 固定使用官方地址 `https://generativelanguage.googleapis.com`
-> - 不提供 `VERTEX_API_BASE`
-> - 服务端网页端默认不在翻译器下拉中显示 Vertex 系列，但管理员 API Key 管理中可配置对应参数
-
-### 1. 获取 API Key
-
-1. 访问 [Google Cloud Vertex AI Studio API Keys](https://console.cloud.google.com/vertex-ai/studio/settings/api-keys)
-2. 登录 Google 账号
-3. 点击"Create API Key"
-4. 选择 Google Cloud 项目（或创建新项目）
-5. 复制生成的 API Key
-
-### 2. 配置到程序中
-
-1. 打开程序
-2. 在桌面端"基础设置"→"翻译器"中选择"Vertex"或"高质量翻译 Vertex"
-3. 在 API Key 管理中填写：
-   - **Vertex API Key**：你的 Google API Key
-   - **Vertex 模型**：
-     - `gemini-2.5-pro`：质量最高 ⭐ 推荐
-     - `gemini-2.5-flash`：速度快，价格便宜
+    - **模型**：
+       - `gemini-2.5-pro`：断句稳定，质量最高 ⭐ 推荐
+       - `gemini-2.5-flash`：速度快，价格便宜
+4. 你的 Google Cloud / Vertex 相关 API Key 也直接填写到 Gemini 配置即可
+5. `Base URL` 保持默认官方地址 `https://generativelanguage.googleapis.com` 即可，无需改成其他地址
 
 ---
 
 ## API OCR 配置（OpenAI OCR / Gemini OCR）
 
-这两个 OCR 仅用于 **Qt 桌面端** 的 OCR 模型选择，不在服务端网页配置页中显示。
+这些 OCR 主要用于 **Qt 桌面端** 的 OCR 模型选择；服务端 **Web 管理端** 的 API Key 配置页也同步提供对应 OCR 分组，供服务端运行时读取。
 
 ### OpenAI OCR
 
@@ -266,12 +240,13 @@ Vertex 系列复用 Google 官方 Gemini 接口，但使用独立的 `VERTEX_*` 
 - 文本识别完成后，文字颜色仍由本地 `48px` 模型提取
 - 通常识别效果最好，但和本地 OCR 的差距往往不大
 - 因为是按文本框逐次请求，会非常消耗请求次数；如果是按次收费的站点，不建议使用
+- Google Cloud / Vertex 相关 API Key 也直接填写 `OCR_GEMINI_*` 或普通 `GEMINI_*`；`OCR_GEMINI_API_BASE` / `GEMINI_API_BASE` 保持默认官方地址即可，无需修改
 
 ---
 
 ## API 上色配置（OpenAI Colorizer / Gemini Colorizer）
 
-这两个上色器仅用于 **Qt 桌面端** 的上色模型选择，不在服务端网页配置页中显示。
+这些上色器主要用于 **Qt 桌面端** 的上色模型选择；服务端 **Web 管理端** 的 API Key 配置页也同步提供对应上色分组。
 
 ### OpenAI Colorizer
 
@@ -315,12 +290,13 @@ Vertex 系列复用 Google 官方 Gemini 接口，但使用独立的 `VERTEX_*` 
 - 若启用 `use_custom_api_params`，上色器会自动把 `examples/custom_api_params.json` 中 `colorizer` 分组的自定义参数并入对应后端请求体；例如：
   - 硅基流动：`cfg`、`num_inference_steps`、`image_size`、`guidance_scale`
   - 百炼原生：`n`、`watermark`、`negative_prompt`、`prompt_extend`、`size`
+- Google Cloud / Vertex 相关 API Key 也直接填写 `COLOR_GEMINI_*` 或普通 `GEMINI_*`；`COLOR_GEMINI_API_BASE` / `GEMINI_API_BASE` 保持默认官方地址即可，无需修改
 
 ---
 
 ## API 渲染配置（OpenAI Renderer / Gemini Renderer）
 
-这两个渲染器仅用于 **Qt 桌面端** 的渲染模型选择，不在服务端网页配置页中显示。
+这些渲染器主要用于 **Qt 桌面端** 的渲染模型选择；服务端 **Web 管理端** 的 API Key 配置页也同步提供对应渲染分组。
 
 ### OpenAI Renderer
 
@@ -363,6 +339,7 @@ Vertex 系列复用 Google 官方 Gemini 接口，但使用独立的 `VERTEX_*` 
 - 并发由 `ai_renderer_concurrency` 控制，仅 Qt 桌面端显示
 - `openai_renderer` 也会根据 `RENDER_OPENAI_API_BASE` / `OPENAI_API_BASE` 自动适配图像接口，规则与 `openai_colorizer` 一致
 - 若启用 `use_custom_api_params`，渲染器会自动把 `examples/custom_api_params.json` 中 `render` 分组的自定义参数并入对应后端请求体
+- Google Cloud / Vertex 相关 API Key 也直接填写 `RENDER_GEMINI_*` 或普通 `GEMINI_*`；`RENDER_GEMINI_API_BASE` / `GEMINI_API_BASE` 保持默认官方地址即可，无需修改
 
 ---
 

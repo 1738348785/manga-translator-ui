@@ -23,21 +23,11 @@
             category: 'translation',
             name: 'Google Gemini',
             i18nKey: 'translator_gemini',
+            note: 'Google Cloud / Vertex 相关 API Key 也可直接填在这里；Base URL 保持默认官方地址即可，无需修改。',
             keys: [
                 { key: 'GEMINI_API_KEY', i18n: 'label_GEMINI_API_KEY', type: 'password', placeholder: 'AIza...' },
                 { key: 'GEMINI_API_BASE', i18n: 'label_GEMINI_API_BASE', type: 'text', placeholder: 'https://generativelanguage.googleapis.com' },
                 { key: 'GEMINI_MODEL', i18n: 'label_GEMINI_MODEL', type: 'text', placeholder: 'gemini-1.5-flash-002' },
-            ],
-        },
-        {
-            id: 'translation-vertex',
-            category: 'translation',
-            name: 'Google Vertex',
-            i18nKey: 'translator_vertex',
-            note: 'Vertex API 地址固定为官方端点，无需额外配置。',
-            keys: [
-                { key: 'VERTEX_API_KEY', i18n: 'label_VERTEX_API_KEY', type: 'password', placeholder: 'AIza...' },
-                { key: 'VERTEX_MODEL', i18n: 'label_VERTEX_MODEL', type: 'text', placeholder: 'gemini-1.5-flash-002' },
             ],
         },
         {
@@ -55,7 +45,7 @@
             id: 'ocr-gemini',
             category: 'ocr',
             name: 'Gemini OCR',
-            note: '需单独配置，不会回落到翻译分组。',
+            note: '需单独配置，不会回落到翻译分组。Google Cloud / Vertex 相关 API Key 也直接填在这里；Base URL 保持默认官方地址即可，无需修改。',
             keys: [
                 { key: 'OCR_GEMINI_API_KEY', i18n: 'label_OCR_GEMINI_API_KEY', type: 'password', placeholder: 'AIza...' },
                 { key: 'OCR_GEMINI_API_BASE', i18n: 'label_OCR_GEMINI_API_BASE', type: 'text', placeholder: 'https://generativelanguage.googleapis.com' },
@@ -77,7 +67,7 @@
             id: 'color-gemini',
             category: 'colorizer',
             name: 'Gemini Colorizer',
-            note: '需单独配置，不会回落到翻译分组。',
+            note: '需单独配置，不会回落到翻译分组。Google Cloud / Vertex 相关 API Key 也直接填在这里；Base URL 保持默认官方地址即可，无需修改。',
             keys: [
                 { key: 'COLOR_GEMINI_API_KEY', i18n: 'label_COLOR_GEMINI_API_KEY', type: 'password', placeholder: 'AIza...' },
                 { key: 'COLOR_GEMINI_API_BASE', i18n: 'label_COLOR_GEMINI_API_BASE', type: 'text', placeholder: 'https://generativelanguage.googleapis.com' },
@@ -99,7 +89,7 @@
             id: 'render-gemini',
             category: 'renderer',
             name: 'Gemini Renderer',
-            note: '需单独配置，不会回落到翻译分组。',
+            note: '需单独配置，不会回落到翻译分组。Google Cloud / Vertex 相关 API Key 也直接填在这里；Base URL 保持默认官方地址即可，无需修改。',
             keys: [
                 { key: 'RENDER_GEMINI_API_KEY', i18n: 'label_RENDER_GEMINI_API_KEY', type: 'password', placeholder: 'AIza...' },
                 { key: 'RENDER_GEMINI_API_BASE', i18n: 'label_RENDER_GEMINI_API_BASE', type: 'text', placeholder: 'https://generativelanguage.googleapis.com' },

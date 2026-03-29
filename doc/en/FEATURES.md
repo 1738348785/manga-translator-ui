@@ -74,7 +74,6 @@ The built-in editor is designed for precise post-processing.
 |--------|------|
 | `OpenAI` | OpenAI-compatible text translation |
 | `Google Gemini` | Gemini-family text translation |
-| `Vertex` | Gemini-family translation with a separate `VERTEX_*` credential namespace |
 | `Sakura` | Japanese-focused translation backend |
 
 ### High-Quality Translators
@@ -83,7 +82,6 @@ The built-in editor is designed for precise post-processing.
 |--------|------|
 | `OpenAI High Quality` | Multimodal translation with image context |
 | `Gemini High Quality` | Multimodal translation with image context |
-| `Vertex High Quality` | Multimodal translation with image context through the fixed official Gemini host |
 
 **Why high-quality translators matter**:
 

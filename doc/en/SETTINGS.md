@@ -500,7 +500,7 @@ The original Chinese document grouped the interface into three tabs. In the curr
 
 - **`AI Line Break Auto Enlarge` (`optimize_line_breaks`)**: enable AI line-break optimization that automatically adjusts font size to reduce broken lines.
   - Current UI location: `Settings` -> `Typesetting` -> `AI Line Break Auto Enlarge`
-  - Requires `OpenAI`, `Google Gemini`, or `Vertex` family translators
+  - Requires `OpenAI` or `Google Gemini` translators
   - AI automatically optimizes line breaks to improve readability
 
 - **`AI Line Break Check` (`check_br_and_retry`)**: check the AI line-break result and retry if needed.
@@ -634,11 +634,15 @@ The original Chinese document grouped the interface into three tabs. In the curr
   - OpenAI OCR: `OCR_OPENAI_API_KEY`, `OCR_OPENAI_MODEL`, `OCR_OPENAI_API_BASE`
   - Gemini OCR: `OCR_GEMINI_API_KEY`, `OCR_GEMINI_MODEL`, `OCR_GEMINI_API_BASE`
   - If OCR-specific variables are empty, the app falls back to the regular `OPENAI_*` or `GEMINI_*` variables used for translation
+  - Google Cloud or Vertex-related API keys can also be entered in `OCR_GEMINI_*` or the regular `GEMINI_*` fields
+  - Keep `OCR_GEMINI_API_BASE` / `GEMINI_API_BASE` empty for the default official host, or keep `https://generativelanguage.googleapis.com`
 
 - **AI colorization environment variables**: API colorization reads dedicated colorization settings first.
   - OpenAI Colorizer: `COLOR_OPENAI_API_KEY`, `COLOR_OPENAI_MODEL`, `COLOR_OPENAI_API_BASE`
   - Gemini Colorizer: `COLOR_GEMINI_API_KEY`, `COLOR_GEMINI_MODEL`, `COLOR_GEMINI_API_BASE`
   - If colorization-specific variables are empty, the app falls back to the regular `OPENAI_*` or `GEMINI_*` variables
+  - Google Cloud or Vertex-related API keys can also be entered in `COLOR_GEMINI_*` or the regular `GEMINI_*` fields
+  - Keep `COLOR_GEMINI_API_BASE` / `GEMINI_API_BASE` empty for the default official host, or keep `https://generativelanguage.googleapis.com`
   - If `COLOR_OPENAI_API_BASE` matches different backends, the app automatically switches request formats:
     - SiliconFlow: `https://api.siliconflow.cn/v1`
     - DashScope native: `https://dashscope.aliyuncs.com/api/v1` or `https://dashscope-intl.aliyuncs.com/api/v1`
@@ -649,6 +653,8 @@ The original Chinese document grouped the interface into three tabs. In the curr
   - OpenAI Renderer: `RENDER_OPENAI_API_KEY`, `RENDER_OPENAI_MODEL`, `RENDER_OPENAI_API_BASE`
   - Gemini Renderer: `RENDER_GEMINI_API_KEY`, `RENDER_GEMINI_MODEL`, `RENDER_GEMINI_API_BASE`
   - If render-specific variables are empty, the app falls back to the regular `OPENAI_*` or `GEMINI_*` variables
+  - Google Cloud or Vertex-related API keys can also be entered in `RENDER_GEMINI_*` or the regular `GEMINI_*` fields
+  - Keep `RENDER_GEMINI_API_BASE` / `GEMINI_API_BASE` empty for the default official host, or keep `https://generativelanguage.googleapis.com`
   - If `RENDER_OPENAI_API_BASE` matches different backends, the app also switches request formats automatically, using rules similar to `OpenAI Colorizer`
   - If `Use Custom API Params` is enabled, the `render` group is automatically mapped into the corresponding backend request body
 
@@ -768,9 +774,9 @@ Example:
   - `dict/system_prompt_line_break.yaml` - system prompt for AI line breaking
   - `dict/glossary_extraction_prompt.yaml` - system prompt for glossary extraction
   - `dict/system_prompt_hq_format.yaml` - system prompt for high-quality translation output format
-  - `dict/ai_ocr_prompt.yaml` - fixed OCR prompt for `OpenAI OCR` / `Gemini OCR`
-  - `dict/ai_colorizer_prompt.yaml` - fixed colorization prompt for `OpenAI Colorizer` / `Gemini Colorizer`
-  - `dict/ai_renderer_prompt.yaml` - fixed rendering prompt for `OpenAI Renderer` / `Gemini Renderer`
+  - `dict/ai_ocr_prompt.yaml` - fixed OCR prompt for `OpenAI OCR` / `Gemini OCR` / `Vertex OCR`
+  - `dict/ai_colorizer_prompt.yaml` - fixed colorization prompt for `OpenAI Colorizer` / `Gemini Colorizer` / `Vertex Colorizer`
+  - `dict/ai_renderer_prompt.yaml` - fixed rendering prompt for `OpenAI Renderer` / `Gemini Renderer` / `Vertex Renderer`
 - **User custom prompts** selected in the UI:
   - `dict/prompt_example.yaml` - prompt example
   - you can add your own `.yaml` or `.json` prompt files here

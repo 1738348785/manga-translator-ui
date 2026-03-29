@@ -64,14 +64,6 @@ RUNTIME_API_REQUIREMENTS = {
         "display_name": "Gemini HQ",
         "accepted_env_vars": ["GEMINI_API_KEY"],
     },
-    "vertex": {
-        "display_name": "Vertex",
-        "accepted_env_vars": ["VERTEX_API_KEY"],
-    },
-    "vertex_hq": {
-        "display_name": "Vertex HQ",
-        "accepted_env_vars": ["VERTEX_API_KEY"],
-    },
     "openai_ocr": {
         "display_name": "OpenAI OCR",
         "accepted_env_vars": ["OCR_OPENAI_API_KEY", "OPENAI_API_KEY"],

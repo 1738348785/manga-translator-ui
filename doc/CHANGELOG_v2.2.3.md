@@ -21,8 +21,8 @@
 - 优化 Qt UI 的“提示词管理 / 字体管理”列表状态展示：当前正在使用的提示词和字体现在会显示明显的选中标记，便于快速识别当前生效项。
 
 ## 📝 文档
-
-- 修正 Vertex API Key 文档入口，改为实际创建地址：`https://console.cloud.google.com/vertex-ai/studio/settings/api-keys`。
+ 
+- 移除独立 `Vertex` / `Vertex OCR` / `Vertex Colorizer` / `Vertex Renderer` 入口的相关说明，统一改为通过 `Gemini` 配置使用 Google Cloud / Vertex 相关 API Key；`Base URL` 保持默认官方地址 `https://generativelanguage.googleapis.com` 即可，无需修改。
 
 ## 📝 说明
 

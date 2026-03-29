@@ -11,7 +11,6 @@ This document explains how to register, choose, and configure the most commonly 
 - [SiliconFlow API Setup](#siliconflow-api-setup)
 - [DeepSeek API Setup](#deepseek-api-setup)
 - [Google Gemini API Setup](#google-gemini-api-setup)
-- [Vertex API Setup](#vertex-api-setup)
 - [API OCR Setup (OpenAI OCR / Gemini OCR)](#api-ocr-setup-openai-ocr--gemini-ocr)
 - [API Colorization Setup (OpenAI Colorizer / Gemini Colorizer)](#api-colorization-setup-openai-colorizer--gemini-colorizer)
 - [API Rendering Setup (OpenAI Renderer / Gemini Renderer)](#api-rendering-setup-openai-renderer--gemini-renderer)
@@ -41,11 +40,9 @@ The current `Translator` dropdown on `Translation Interface` separates text-only
 - **Text-only translators**:
   - `OpenAI`
   - `Google Gemini`
-  - `Vertex`
 - **Multimodal translators**:
   - `OpenAI High Quality`
   - `Gemini High Quality`
-  - `Vertex High Quality`
 
 Use the high-quality translators when your selected model supports image input.
 
@@ -94,7 +91,7 @@ Common operations on this page:
 
 The app currently provides two main translator interface styles:
 
-#### Text-only translators (`OpenAI` / `Google Gemini` / `Vertex`)
+#### Text-only translators (`OpenAI` / `Google Gemini`)
 
 - use text API requests
 - only send OCR text
@@ -102,7 +99,7 @@ The app currently provides two main translator interface styles:
 - cheaper
 - good for simpler workloads
 
-#### High-quality translators (`OpenAI High Quality` / `Gemini High Quality` / `Vertex High Quality`)
+#### High-quality translators (`OpenAI High Quality` / `Gemini High Quality`)
 
 - use multimodal requests
 - send image plus text
@@ -135,14 +132,8 @@ If your provider offers an OpenAI-compatible interface, you can usually configur
 - The app adds the API version path automatically
 - If you use an official Google AI Studio key, leaving `Gemini API Base` empty is usually fine
 
-#### Vertex APIs
-
-- The Vertex translator path always uses the fixed official Gemini host:
-  - `https://generativelanguage.googleapis.com`
-- There is no public `VERTEX_API_BASE` field
-- You only configure:
-  - `VERTEX_API_KEY`
-  - `VERTEX_MODEL`
+- Google Cloud or Vertex-related API keys can also be entered directly in the Gemini fields
+- You do not need to change the Gemini base URL. Leave it empty for the default official host, or keep `https://generativelanguage.googleapis.com`
 
 ### Current translation-tab field names
 
@@ -154,8 +145,6 @@ On `API Management` -> `Translation`, the most commonly used rows are:
 - `Gemini API Key`
 - `Gemini Model`
 - `Gemini API Base`
-- `Vertex API Key`
-- `Vertex Model`
 - `DeepSeek API Key`
 - `DeepSeek Model`
 - `DeepSeek API Base`
@@ -324,48 +313,14 @@ Suggested model choices from the source guide:
 
 - `gemini-2.5-pro`: best quality, stable for line breaking
 - `gemini-2.5-flash`: faster and cheaper
-
----
-
-## Vertex API Setup
-
-The Vertex translator path reuses the official Gemini backend but keeps a separate `VERTEX_*` credential namespace. Use it when you want to isolate one Google-official key/model setup from the normal Gemini configuration.
-
-Important behavior:
-
-- The host is fixed internally to `https://generativelanguage.googleapis.com`
-- There is no public `VERTEX_API_BASE` field
-- In the web server UI, Vertex translators are hidden from the translator dropdown by default, but the admin API-key page still exposes the matching `VERTEX_*` fields
-
-### 1. Get an API key
-
-1. Visit [Google Cloud Vertex AI Studio API Keys](https://console.cloud.google.com/vertex-ai/studio/settings/api-keys)
-2. Sign in with a Google account
-3. Click `Create API Key`
-4. Select or create a Google Cloud project
-5. Copy the generated API key
-
-### 2. Configure it in the app
-
-1. Open `Translation Interface`
-2. Set `Translator` to `Vertex` or `Vertex High Quality`
-3. Open `API Management`
-4. Open `Translation`
-5. Fill:
-   - `Vertex API Key`: your Google API key
-   - `Vertex Model`: choose the model you want
-6. Click `Test`
-
-Suggested model choices:
-
-- `gemini-2.5-pro`: best quality
-- `gemini-2.5-flash`: faster and cheaper
+4. The Google Cloud or Vertex-related API key you use can also go directly into the same Gemini fields
+5. Keep the default official Gemini base URL and do not replace it with another host
 
 ---
 
 ## API OCR Setup (OpenAI OCR / Gemini OCR)
 
-These OCR backends are mainly used by the Qt desktop UI and are configured through both `Settings` and `API Management`.
+These OCR backends are mainly used by the Qt desktop UI and are configured through both `Settings` and `API Management`. The web admin API-key page now also exposes matching OCR groups for server-side runtime config.
 
 ### Where they appear in the UI
 
@@ -442,12 +397,13 @@ Prompt file notes:
 - after text is recognized, text color is still extracted by the local `48px` model
 - recognition quality is often very good
 - the improvement over local OCR is usually not dramatic enough to justify request-count billing on some providers
+- Google Cloud or Vertex-related API keys can also be entered in `OCR_GEMINI_*` or the regular `GEMINI_*` fields; keep the default official Gemini base URL unchanged
 
 ---
 
 ## API Colorization Setup (OpenAI Colorizer / Gemini Colorizer)
 
-These colorizers are desktop-side colorization options, not generic translation APIs.
+These colorizers are desktop-side colorization options, not generic translation APIs. The web admin API-key page now also exposes matching colorization groups for server-side runtime config.
 
 ### Where they appear in the UI
 
@@ -512,6 +468,7 @@ Prompt file notes:
 - `OpenAI Colorizer` and `Gemini Colorizer` work on full pages
 - the current desktop UI exposes `AI Colorizer History Pages` instead of the older `ai_colorizer_concurrency` wording used in older docs
 - multi-image prompts can label reference pages as `Image 1`, `Image 2`, and so on
+- Google Cloud or Vertex-related API keys can also be entered in `COLOR_GEMINI_*` or the regular `GEMINI_*` fields; keep the default official Gemini base URL unchanged
 
 If `COLOR_OPENAI_API_BASE` or `OPENAI_API_BASE` points to different OpenAI-compatible image backends, the app automatically adapts the request format. Examples from the source guide:
 
@@ -526,7 +483,7 @@ If `Use Custom API Params` is enabled, the app also merges the `colorizer` group
 
 ## API Rendering Setup (OpenAI Renderer / Gemini Renderer)
 
-These renderers are desktop-side full-page rendering options that combine cleaned page images with translated text regions.
+These renderers are desktop-side full-page rendering options that combine cleaned page images with translated text regions. The web admin API-key page now also exposes matching rendering groups for server-side runtime config.
 
 ### Where they appear in the UI
 
@@ -595,6 +552,7 @@ Prompt file notes:
   - the translated text list for the matching numbers
 - translated sound effects are also sent together when available
 - concurrency is controlled by `AI Renderer Concurrency`
+- Google Cloud or Vertex-related API keys can also be entered in `RENDER_GEMINI_*` or the regular `GEMINI_*` fields; keep the default official Gemini base URL unchanged
 
 If `RENDER_OPENAI_API_BASE` or `OPENAI_API_BASE` points to a special OpenAI-compatible image backend, the app adapts the request format automatically, using rules similar to `OpenAI Colorizer`.
 

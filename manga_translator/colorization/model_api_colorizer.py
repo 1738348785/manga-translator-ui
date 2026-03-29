@@ -495,7 +495,6 @@ class GeminiColorizer(BaseAPIColorizer):
             raise RuntimeError("Gemini colorization response did not contain an image.")
         return image_result
 
-
 def _ordinal_label(index: int) -> str:
     labels = {
         1: "first",

@@ -1487,7 +1487,10 @@ class MangaTranslator:
         colorizer_type = getattr(colorizer_config, 'colorizer', None)
         return (
             self._get_ai_colorizer_history_pages(config) > 0
-            and colorizer_type in {Colorizer.openai_colorizer, Colorizer.gemini_colorizer}
+            and colorizer_type in {
+                Colorizer.openai_colorizer,
+                Colorizer.gemini_colorizer,
+            }
         )
 
     def _get_colorizer_history_images(self, config: Config) -> list[Image.Image]:
@@ -3340,7 +3343,10 @@ class MangaTranslator:
             self._log_cuda_memory_snapshot("inpainting/after_dispatch")
 
     def _should_skip_inpainting_for_ai_renderer(self, config: Config) -> bool:
-        return config.render.renderer in (Renderer.openai_renderer, Renderer.gemini_renderer)
+        return config.render.renderer in (
+            Renderer.openai_renderer,
+            Renderer.gemini_renderer,
+        )
 
     async def _run_text_rendering(self, config: Config, ctx: Context, skip_font_scaling: bool = False):
         # ✅ 检查停止标志
@@ -3629,7 +3635,7 @@ class MangaTranslator:
             if first_config and hasattr(first_config.translator, 'translator'):
                 from manga_translator.config import Translator
                 translator_type = first_config.translator.translator
-                is_hq_translator = translator_type in [Translator.openai_hq, Translator.gemini_hq, Translator.vertex_hq]
+                is_hq_translator = translator_type in [Translator.openai_hq, Translator.gemini_hq]
                 is_import_export_mode = self.load_text or self.template or self.translate_json_only
 
                 # 如果是高质量翻译且未启用并发模式，使用专用的高质量翻译流程
@@ -4786,7 +4792,7 @@ class MangaTranslator:
                     
                     # ✅ 为HQ翻译器准备high_quality_batch_data（包含图片和text_regions）
                     # 这是HQ翻译器进入高质量批量模式的必要条件，也是AI断句检查能正常工作的前提
-                    if sample_config.translator.translator in [Translator.openai_hq, Translator.gemini_hq, Translator.vertex_hq]:
+                    if sample_config.translator.translator in [Translator.openai_hq, Translator.gemini_hq]:
                         hq_batch_data = []
                         global_text_index = 1  # 全局文本编号从1开始（与提示词中的编号一致）
                         for ctx, _ in batch:
@@ -5225,25 +5231,19 @@ class MangaTranslator:
 
 
         # 如果是OpenAI翻译器、Gemini翻译器或高质量翻译器，需要处理上下文
-        if config.translator.translator in [Translator.openai, Translator.gemini, Translator.vertex, Translator.openai_hq, Translator.gemini_hq, Translator.vertex_hq]:
+        if config.translator.translator in [Translator.openai, Translator.gemini, Translator.openai_hq, Translator.gemini_hq]:
             if config.translator.translator == Translator.openai:
                 from .translators.openai import OpenAITranslator
                 translator = OpenAITranslator()
             elif config.translator.translator == Translator.gemini:
                 from .translators.gemini import GeminiTranslator
                 translator = GeminiTranslator()
-            elif config.translator.translator == Translator.vertex:
-                from .translators.vertex import VertexTranslator
-                translator = VertexTranslator()
             elif config.translator.translator == Translator.openai_hq:
                 from .translators.openai_hq import OpenAIHighQualityTranslator
                 translator = OpenAIHighQualityTranslator()
             elif config.translator.translator == Translator.gemini_hq:
                 from .translators.gemini_hq import GeminiHighQualityTranslator
                 translator = GeminiHighQualityTranslator()
-            elif config.translator.translator == Translator.vertex_hq:
-                from .translators.vertex_hq import VertexHighQualityTranslator
-                translator = VertexHighQualityTranslator()
 
             translator.parse_args(config)
             # 注意：-1 表示无限重试，也是有效值
@@ -5288,8 +5288,8 @@ class MangaTranslator:
             # 将config附加到ctx，供翻译器使用（例如AI断句功能）
             ctx.config = config
             
-            # openai_hq, gemini_hq, vertex_hq 等需要传递ctx参数
-            if config.translator.translator in [Translator.openai_hq, Translator.gemini_hq, Translator.vertex_hq]:
+            # openai_hq、gemini_hq 等需要传递ctx参数
+            if config.translator.translator in [Translator.openai_hq, Translator.gemini_hq]:
                 # 所有需要上下文的翻译器都在这里传递ctx
                 return await translator._translate(
                     ctx.from_lang,

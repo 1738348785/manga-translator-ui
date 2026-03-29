@@ -41,7 +41,6 @@ def _get_gemini_ocr_class():
     from .model_api_ocr import ModelGeminiOCR
     return ModelGeminiOCR
 
-
 OCRS = {
     Ocr.ocr32px: Model32pxOCR,
     Ocr.ocr48px: Model48pxOCR,

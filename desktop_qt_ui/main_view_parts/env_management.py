@@ -14,14 +14,16 @@ def create_env_widgets(self, keys: list, current_values: dict):
     row = 0
     for key in keys:
         value = current_values.get(key, "")
-        
+
+        labels_map = self.controller.get_display_mapping("labels") or {}
         display_key = key
-        for prefix in ["OCR_", "COLOR_", "RENDER_"]:
-            if key.startswith(prefix):
-                display_key = key[len(prefix):]
-                break
-                
-        label_text = self.controller.get_display_mapping("labels").get(display_key, display_key)
+        label_text = labels_map.get(key)
+        if not label_text:
+            for prefix in ["OCR_", "COLOR_", "RENDER_"]:
+                if key.startswith(prefix):
+                    display_key = key[len(prefix):]
+                    break
+            label_text = labels_map.get(display_key, display_key)
         label = QLabel(f"{label_text}:")
         widget = QLineEdit(str(value) if value else "")
         widget.setPlaceholderText(self._get_env_default_placeholder(key))
@@ -55,12 +57,20 @@ def get_env_default_placeholder(self, key: str) -> str:
     key_placeholder = self._t("placeholder_paste_key")
     token_placeholder = self._t("placeholder_paste_token")
     normalized_key = key.upper()
-    for prefix in ("OCR_", "COLOR_", "RENDER_"):
-        if normalized_key.startswith(prefix):
-            normalized_key = normalized_key[len(prefix):]
-            break
 
     default_placeholders = {
+        "OCR_OPENAI_API_BASE": "https://api.openai.com/v1",
+        "OCR_OPENAI_MODEL": "gpt-4o",
+        "OCR_GEMINI_API_BASE": "https://generativelanguage.googleapis.com",
+        "OCR_GEMINI_MODEL": "gemini-1.5-flash",
+        "COLOR_OPENAI_API_BASE": "https://api.openai.com/v1",
+        "COLOR_OPENAI_MODEL": "gpt-image-1",
+        "COLOR_GEMINI_API_BASE": "https://generativelanguage.googleapis.com",
+        "COLOR_GEMINI_MODEL": "gemini-2.0-flash-preview-image-generation",
+        "RENDER_OPENAI_API_BASE": "https://api.openai.com/v1",
+        "RENDER_OPENAI_MODEL": "gpt-image-1",
+        "RENDER_GEMINI_API_BASE": "https://generativelanguage.googleapis.com",
+        "RENDER_GEMINI_MODEL": "gemini-2.0-flash-preview-image-generation",
         "OPENAI_API_BASE": "https://api.openai.com/v1",
         "CUSTOM_OPENAI_API_BASE": "https://api.openai.com/v1",
         "GEMINI_API_BASE": "https://generativelanguage.googleapis.com",
@@ -68,18 +78,25 @@ def get_env_default_placeholder(self, key: str) -> str:
         "OPENAI_MODEL": "gpt-4o",
         "CUSTOM_OPENAI_MODEL": "qwen2.5:7b",
         "GEMINI_MODEL": "gemini-1.5-flash-002",
-        "VERTEX_MODEL": "gemini-1.5-flash-002",
         "GROQ_MODEL": "mixtral-8x7b-32768",
         "DEEPSEEK_MODEL": "deepseek-chat",
         "OPENAI_API_KEY": key_placeholder,
         "CUSTOM_OPENAI_API_KEY": key_placeholder,
         "GEMINI_API_KEY": key_placeholder,
-        "VERTEX_API_KEY": key_placeholder,
         "GROQ_API_KEY": key_placeholder,
         "DEEPSEEK_API_KEY": key_placeholder,
         "DEEPL_AUTH_KEY": key_placeholder,
         "CAIYUN_TOKEN": token_placeholder,
     }
+    exact_placeholder = default_placeholders.get(normalized_key)
+    if exact_placeholder is not None:
+        return exact_placeholder
+
+    for prefix in ("OCR_", "COLOR_", "RENDER_"):
+        if normalized_key.startswith(prefix):
+            normalized_key = normalized_key[len(prefix):]
+            break
+
     return default_placeholders.get(normalized_key, "")
 
 
@@ -115,7 +132,6 @@ def _detect_test_target(env_key: str, translator_key: str) -> str:
         "DEEPSEEK": "deepseek",
         "GROQ": "groq",
         "GEMINI": "gemini",
-        "VERTEX": "vertex",
         "SAKURA": "sakura",
     }
     target = provider_targets.get(provider)
@@ -129,8 +145,6 @@ def _detect_test_target(env_key: str, translator_key: str) -> str:
 def _get_api_address_example(api_type: str) -> str:
     normalized = (api_type or "").lower()
     if "gemini" in normalized:
-        return "https://generativelanguage.googleapis.com"
-    if "vertex" in normalized:
         return "https://generativelanguage.googleapis.com"
     if "deepseek" in normalized:
         return "https://api.deepseek.com"
@@ -265,7 +279,7 @@ def _split_env_key(env_key: str) -> tuple[str, str, str]:
             normalized_key = normalized_key[len(prefix):]
             break
 
-    for provider in ("CUSTOM_OPENAI", "OPENAI", "GEMINI", "VERTEX", "DEEPSEEK", "GROQ", "SAKURA"):
+    for provider in ("CUSTOM_OPENAI", "OPENAI", "GEMINI", "DEEPSEEK", "GROQ", "SAKURA"):
         provider_prefix = f"{provider}_"
         if normalized_key.startswith(provider_prefix):
             field = normalized_key[len(provider_prefix):]

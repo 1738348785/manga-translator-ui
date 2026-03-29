@@ -478,7 +478,7 @@ def _finalize_settings_ui(self):
     # --- [OCR Tab] ---
     ocr_keys = [
         ("OpenAI", ["OCR_OPENAI_API_KEY", "OCR_OPENAI_MODEL", "OCR_OPENAI_API_BASE"]),
-        ("Gemini", ["OCR_GEMINI_API_KEY", "OCR_GEMINI_MODEL", "OCR_GEMINI_API_BASE"])
+        ("Gemini", ["OCR_GEMINI_API_KEY", "OCR_GEMINI_MODEL", "OCR_GEMINI_API_BASE"]),
     ]
     for name, keys in ocr_keys:
         group_box = QGroupBox(name)
@@ -501,7 +501,7 @@ def _finalize_settings_ui(self):
     # --- [Colorization Tab] ---
     color_keys = [
         ("OpenAI", ["COLOR_OPENAI_API_KEY", "COLOR_OPENAI_MODEL", "COLOR_OPENAI_API_BASE"]),
-        ("Gemini", ["COLOR_GEMINI_API_KEY", "COLOR_GEMINI_MODEL", "COLOR_GEMINI_API_BASE"])
+        ("Gemini", ["COLOR_GEMINI_API_KEY", "COLOR_GEMINI_MODEL", "COLOR_GEMINI_API_BASE"]),
     ]
     for name, keys in color_keys:
         group_box = QGroupBox(name)
@@ -524,7 +524,7 @@ def _finalize_settings_ui(self):
     # --- [Render Tab] ---
     render_keys = [
         ("OpenAI", ["RENDER_OPENAI_API_KEY", "RENDER_OPENAI_MODEL", "RENDER_OPENAI_API_BASE"]),
-        ("Gemini", ["RENDER_GEMINI_API_KEY", "RENDER_GEMINI_MODEL", "RENDER_GEMINI_API_BASE"])
+        ("Gemini", ["RENDER_GEMINI_API_KEY", "RENDER_GEMINI_MODEL", "RENDER_GEMINI_API_BASE"]),
     ]
     for name, keys in render_keys:
         group_box = QGroupBox(name)

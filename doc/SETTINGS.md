@@ -375,7 +375,7 @@
 - **气泡内居中 (center_text_in_bubble)**：文本块在气泡框内居中显示
 
 - **AI断句自动扩大文字 (optimize_line_breaks)**：启用 AI 断句优化（自动调整字体大小以减少断行）
-  - 需要配合 OpenAI/Gemini/Vertex 翻译器使用
+  - 需要配合 OpenAI/Gemini 翻译器使用
   - AI 会自动优化文本断行，提升文本可读性
 
 - **AI断句检查 (check_br_and_retry)**：检查 AI 断句结果并重试（确保断句质量）
@@ -478,11 +478,15 @@
   - OpenAI OCR：`OCR_OPENAI_API_KEY`、`OCR_OPENAI_MODEL`、`OCR_OPENAI_API_BASE`
   - Gemini OCR：`OCR_GEMINI_API_KEY`、`OCR_GEMINI_MODEL`、`OCR_GEMINI_API_BASE`
   - 若未填写 OCR 专用变量，会自动回退到普通翻译接口使用的 `OPENAI_*` 或 `GEMINI_*`
+  - Google Cloud / Vertex 相关 API Key 也直接填写到 `OCR_GEMINI_*` 或普通 `GEMINI_*`
+  - `OCR_GEMINI_API_BASE` / `GEMINI_API_BASE` 保持默认官方地址 `https://generativelanguage.googleapis.com` 即可，无需修改
 
 - **AI 上色环境变量**：API 上色优先读取独立的上色接口配置
   - OpenAI Colorizer：`COLOR_OPENAI_API_KEY`、`COLOR_OPENAI_MODEL`、`COLOR_OPENAI_API_BASE`
   - Gemini Colorizer：`COLOR_GEMINI_API_KEY`、`COLOR_GEMINI_MODEL`、`COLOR_GEMINI_API_BASE`
   - 若未填写上色专用变量，会自动回退到普通 `OPENAI_*` 或 `GEMINI_*`
+  - Google Cloud / Vertex 相关 API Key 也直接填写到 `COLOR_GEMINI_*` 或普通 `GEMINI_*`
+  - `COLOR_GEMINI_API_BASE` / `GEMINI_API_BASE` 保持默认官方地址 `https://generativelanguage.googleapis.com` 即可，无需修改
   - `COLOR_OPENAI_API_BASE` 命中不同后端时会自动切换请求格式：
     - 硅基流动 `https://api.siliconflow.cn/v1`
     - 百炼原生 `https://dashscope.aliyuncs.com/api/v1` / `https://dashscope-intl.aliyuncs.com/api/v1`
@@ -493,6 +497,8 @@
   - OpenAI Renderer：`RENDER_OPENAI_API_KEY`、`RENDER_OPENAI_MODEL`、`RENDER_OPENAI_API_BASE`
   - Gemini Renderer：`RENDER_GEMINI_API_KEY`、`RENDER_GEMINI_MODEL`、`RENDER_GEMINI_API_BASE`
   - 若未填写渲染专用变量，会自动回退到普通 `OPENAI_*` 或 `GEMINI_*`
+  - Google Cloud / Vertex 相关 API Key 也直接填写到 `RENDER_GEMINI_*` 或普通 `GEMINI_*`
+  - `RENDER_GEMINI_API_BASE` / `GEMINI_API_BASE` 保持默认官方地址 `https://generativelanguage.googleapis.com` 即可，无需修改
   - `RENDER_OPENAI_API_BASE` 命中不同后端时也会自动切换请求格式，规则与 OpenAI Colorizer 一致
   - 若启用 `use_custom_api_params`，`render` 分组参数会自动映射到对应后端请求体
 
@@ -588,9 +594,9 @@
   - `dict/system_prompt_line_break.yaml` - AI断句的系统提示词
   - `dict/glossary_extraction_prompt.yaml` - 术语提取的系统提示词
   - `dict/system_prompt_hq_format.yaml` - 高质量翻译输出格式的系统提示词
-  - `dict/ai_ocr_prompt.yaml` - OpenAI OCR / Gemini OCR 使用的固定 OCR 提示词
-  - `dict/ai_colorizer_prompt.yaml` - OpenAI Colorizer / Gemini Colorizer 使用的固定上色提示词
-  - `dict/ai_renderer_prompt.yaml` - OpenAI Renderer / Gemini Renderer 使用的固定渲染提示词
+  - `dict/ai_ocr_prompt.yaml` - OpenAI OCR / Gemini OCR / Vertex OCR 使用的固定 OCR 提示词
+  - `dict/ai_colorizer_prompt.yaml` - OpenAI Colorizer / Gemini Colorizer / Vertex Colorizer 使用的固定上色提示词
+  - `dict/ai_renderer_prompt.yaml` - OpenAI Renderer / Gemini Renderer / Vertex Renderer 使用的固定渲染提示词
 - **用户自定义提示词**（在界面中选择）：
   - `dict/prompt_example.yaml` - 提示词示例
   - 可以在此目录添加自己的 `.yaml` 或 `.json` 提示词文件

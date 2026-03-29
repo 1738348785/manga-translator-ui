@@ -2052,7 +2052,10 @@ async def dispatch(
         from ..config import Config
         config = Config()
 
-    if config.render.renderer in (Renderer.openai_renderer, Renderer.gemini_renderer):
+    if config.render.renderer in (
+        Renderer.openai_renderer,
+        Renderer.gemini_renderer,
+    ):
         from .model_api_renderer import dispatch_api_rendering
 
         return await dispatch_api_rendering(img=img, text_regions=text_regions, config=config)

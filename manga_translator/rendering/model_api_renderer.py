@@ -433,7 +433,6 @@ class GeminiRenderer(BaseAPIRenderer):
             raise RuntimeError("Gemini renderer response did not contain an image.")
         return image_result
 
-
 def get_api_renderer(key: Renderer) -> BaseAPIRenderer:
     if key == Renderer.openai_renderer:
         return OpenAIRenderer()

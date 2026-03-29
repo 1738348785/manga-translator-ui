@@ -383,13 +383,7 @@ services:
 | `GEMINI_MODEL` | Gemini 模型名称（可选，默认 gemini-1.5-flash-002） |
 | `GEMINI_API_BASE` | Gemini API 基础 URL（可选，默认官方地址） |
 
-**Vertex 系列**：
-| 变量名 | 说明 |
-|--------|------|
-| `VERTEX_API_KEY` | Vertex API Key（用于 vertex、vertex_hq 翻译器） |
-| `VERTEX_MODEL` | Vertex 模型名称（可选，默认 gemini-1.5-flash-002） |
-
-> 💡 **说明**：Vertex 系列固定使用 Google 官方 Gemini host，`VERTEX_API_BASE` 不对外提供，也无需配置。
+> 💡 **说明**：Google Cloud / Vertex 相关 API Key 也直接填写到 `GEMINI_API_KEY` 即可；`GEMINI_API_BASE` 留空或保持默认官方地址 `https://generativelanguage.googleapis.com`，无需修改。
 
 **其他商业翻译服务**：
 | 变量名 | 说明 |
@@ -477,8 +471,6 @@ services:
       MANGA_TRANSLATOR_ADMIN_PASSWORD=your_secure_password
       OPENAI_API_KEY=sk-xxxxxxxxxxxxx
       GEMINI_API_KEY=xxxxxxxxxxxxx
-      VERTEX_API_KEY=xxxxxxxxxxxxx
-      VERTEX_MODEL=gemini-1.5-flash-002
       ```
 
 5. **启动容器**，访问 `http://服务器IP:8000` 即可使用
