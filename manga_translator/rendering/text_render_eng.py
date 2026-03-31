@@ -6,7 +6,7 @@ from PIL import Image
 
 from ..utils import TextBlock, get_logger, rect_distance
 from .ballon_extractor import extract_ballon_region
-from .text_render import add_color, get_char_glyph, put_char_horizontal
+from .text_render import add_color, get_char_offset_x, put_char_horizontal
 
 logger = get_logger('text_render_eng')
 
@@ -362,15 +362,13 @@ def render_textblock_list_eng(
         font_size = int(font_size)
         sw = int(font_size * stroke_width)
         line_height = int(font_size * 0.8)
-        delimiter_glyph = get_char_glyph(delimiter, font_size, 0)
-        delimiter_len = delimiter_glyph.advance.x >> 6
+        delimiter_len = get_char_offset_x(font_size, delimiter)
         base_length = -1
         word_lengths = []
         for word in words:
             word_length = 0
             for cdpt in word:
-                glyph = get_char_glyph(cdpt, font_size, 0)
-                char_offset_x = glyph.metrics.horiAdvance >> 6
+                char_offset_x = get_char_offset_x(font_size, cdpt)
                 word_length += char_offset_x
             word_lengths.append(word_length)
             if word_length > base_length:

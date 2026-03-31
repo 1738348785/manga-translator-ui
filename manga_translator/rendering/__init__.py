@@ -169,10 +169,9 @@ def calc_text_block_dimensions(text: str, is_horizontal: bool, line_spacing: flo
                     is_horizontal_block = part.lower().startswith('<h>') and part.lower().endswith('</h>')
                     if not is_horizontal_block:
                         for c in part:
-                            cdpt, _ = text_render.CJK_Compatibility_Forms_translate(c, 1)
-                            slot = text_render.get_char_glyph(cdpt, base_font, 1)
-                            if slot.bitmap.width > max_width:
-                                max_width = slot.bitmap.width
+                            char_width = text_render.get_vertical_char_bitmap_width(base_font, c)
+                            if char_width > max_width:
+                                max_width = char_width
                 line_widths.append(max_width)
 
             # 和后端渲染一致：sum(line_widths) + spacing
@@ -1249,128 +1248,54 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         chosen_font_size = region.font_size if region.font_size > 0 else chosen_font_size
                         logger.debug(f"balloon_fill region {region_idx}: not fully enclosed, fallback to smart_scaling")
                     else:
-                        bubble_width, bubble_height = region.unrotated_size
-                        mask_nonzero = cv2.findNonZero(region_bubble_mask)
-                        if mask_nonzero is not None:
-                            _, _, bubble_width, bubble_height = cv2.boundingRect(mask_nonzero)
-                        if not (isinstance(bubble_width, (int, float)) and np.isfinite(bubble_width) and bubble_width > 0):
-                            bubble_width = float(max(region.xywh[2], 1))
-                        if not (isinstance(bubble_height, (int, float)) and np.isfinite(bubble_height) and bubble_height > 0):
-                            bubble_height = float(max(region.xywh[3], 1))
+                        line_box_width, line_box_height = region.unrotated_size
+                        if not (isinstance(line_box_width, (int, float)) and np.isfinite(line_box_width) and line_box_width > 0):
+                            line_box_width = float(max(region.xywh[2], 1))
+                        if not (isinstance(line_box_height, (int, float)) and np.isfinite(line_box_height) and line_box_height > 0):
+                            line_box_height = float(max(region.xywh[3], 1))
 
-                        layout_target_font_size = int(target_font_size)
-                        # 对所有 balloon_fill(enclosed) 场景先做一次“框->字体”估算：
-                        # 若估算字号更大，则提升目标字号上限，避免被输入字号卡死。
-                        estimated_font_from_box = calc_font_from_box(
-                            width=float(bubble_width),
-                            height=float(bubble_height),
-                            text=region.translation,
-                            is_horizontal=render_horizontally,
-                            line_spacing=line_spacing_multiplier,
-                            config=config,
-                            target_lang=region.target_lang,
-                            letter_spacing=letter_spacing_multiplier,
-                        )
-                        if estimated_font_from_box > layout_target_font_size:
+                        layout_target_font_size = int(max(target_font_size, layout_min_font_size))
+                        configured_fixed_font_size = _resolve_configured_fixed_font_size(config)
+
+                        if has_br:
+                            if configured_fixed_font_size <= 0:
+                                layout_target_font_size = max(
+                                    int(
+                                        calc_font_from_box(
+                                            width=float(line_box_width),
+                                            height=float(line_box_height),
+                                            text=region.translation,
+                                            is_horizontal=render_horizontally,
+                                            line_spacing=line_spacing_multiplier,
+                                            config=config,
+                                            target_lang=region.target_lang,
+                                            letter_spacing=letter_spacing_multiplier,
+                                        )
+                                    ),
+                                    layout_min_font_size,
+                                )
                             logger.debug(
-                                f"balloon_fill region {region_idx}: boost layout_target_font_size "
-                                f"{layout_target_font_size}->{estimated_font_from_box} (calc_font_from_box)"
+                                f"balloon_fill region {region_idx}: keep explicit breaks, line-driven font={layout_target_font_size}"
                             )
-                            layout_target_font_size = int(estimated_font_from_box)
+                        else:
+                            line_layout_max_font_size = int(
+                                max(layout_target_font_size, line_box_width, line_box_height, layout_min_font_size)
+                            )
+                            if configured_fixed_font_size > 0:
+                                line_layout_max_font_size = int(max(configured_fixed_font_size, layout_min_font_size))
+                                layout_target_font_size = int(max(configured_fixed_font_size, layout_min_font_size))
 
-                        if not has_br:
-                            no_br_max_font_size = int(layout_target_font_size)
-                            if render_horizontally:
-                                total_width = text_render.get_string_width(
-                                    layout_target_font_size,
-                                    region.translation,
-                                    letter_spacing=letter_spacing_multiplier,
-                                )
-                                spacing_y = int(layout_target_font_size * 0.01 * line_spacing_multiplier)
-                                ratio = bubble_width / bubble_height if bubble_height > 0 else 1.0
-
-                                a = layout_target_font_size + spacing_y
-                                b = -spacing_y
-                                c = -total_width / ratio if ratio > 0 else -total_width
-
-                                discriminant = b * b - 4 * a * c
-                                if discriminant >= 0 and a > 0:
-                                    n_float = (-b + np.sqrt(discriminant)) / (2 * a)
-                                    n_floor = max(1, int(np.floor(n_float)))
-                                    n_ceil = max(1, int(np.ceil(n_float)))
-                                else:
-                                    n_floor = n_ceil = 1
-
-                                def calc_max_font_horizontal(n, total_w, bw, bh, lsm, target_fs):
-                                    height_factor = n + (n - 1) * 0.01 * lsm
-                                    max_by_height = int(bh / height_factor) if height_factor > 0 else target_fs
-                                    max_by_width = int(bw * n * target_fs / total_w) if total_w > 0 else target_fs
-                                    return min(max_by_height, max_by_width)
-
-                                font_floor = calc_max_font_horizontal(
-                                    n_floor, total_width, bubble_width, bubble_height, line_spacing_multiplier, layout_target_font_size
-                                )
-                                font_ceil = calc_max_font_horizontal(
-                                    n_ceil, total_width, bubble_width, bubble_height, line_spacing_multiplier, layout_target_font_size
-                                )
-
-                                if font_floor >= font_ceil:
-                                    seed_segments = n_floor
-                                    seed_font_size = font_floor
-                                else:
-                                    seed_segments = n_ceil
-                                    seed_font_size = font_ceil
-                            else:
-                                total_height = text_render.get_string_height(
-                                    layout_target_font_size,
-                                    region.translation,
-                                    letter_spacing=letter_spacing_multiplier,
-                                )
-                                spacing_x = int(layout_target_font_size * 0.2 * line_spacing_multiplier)
-                                ratio = bubble_width / bubble_height if bubble_height > 0 else 1.0
-
-                                a = layout_target_font_size + spacing_x
-                                b = -spacing_x
-                                c = -total_height * ratio
-
-                                discriminant = b * b - 4 * a * c
-                                if discriminant >= 0 and a > 0:
-                                    n_float = (-b + np.sqrt(discriminant)) / (2 * a)
-                                    n_floor = max(1, int(np.floor(n_float)))
-                                    n_ceil = max(1, int(np.ceil(n_float)))
-                                else:
-                                    n_floor = n_ceil = 1
-
-                                def calc_max_font_vertical(n, total_h, bw, bh, lsm, target_fs):
-                                    width_factor = n + (n - 1) * 0.2 * lsm
-                                    max_by_width = int(bw / width_factor) if width_factor > 0 else target_fs
-                                    max_by_height = int(bh * n * target_fs / total_h) if total_h > 0 else target_fs
-                                    return min(max_by_width, max_by_height)
-
-                                font_floor = calc_max_font_vertical(
-                                    n_floor, total_height, bubble_width, bubble_height, line_spacing_multiplier, layout_target_font_size
-                                )
-                                font_ceil = calc_max_font_vertical(
-                                    n_ceil, total_height, bubble_width, bubble_height, line_spacing_multiplier, layout_target_font_size
-                                )
-
-                                if font_floor >= font_ceil:
-                                    seed_segments = n_floor
-                                    seed_font_size = font_floor
-                                else:
-                                    seed_segments = n_ceil
-                                    seed_font_size = font_ceil
-
-                            seed_font_size = int(max(min(seed_font_size, layout_target_font_size), layout_min_font_size))
+                            seed_segments = max(1, len(region.lines))
+                            seed_font_size = int(max(min(layout_target_font_size, line_layout_max_font_size), layout_min_font_size))
                             no_br_result = solve_no_br_layout(
                                 text=region.translation,
                                 horizontal=render_horizontally,
                                 seed_segments=seed_segments,
                                 seed_font_size=seed_font_size,
-                                bubble_width=bubble_width,
-                                bubble_height=bubble_height,
+                                bubble_width=float(line_box_width),
+                                bubble_height=float(line_box_height),
                                 min_font_size=layout_min_font_size,
-                                max_font_size=no_br_max_font_size,
+                                max_font_size=line_layout_max_font_size,
                                 line_spacing_multiplier=line_spacing_multiplier,
                                 letter_spacing_multiplier=letter_spacing_multiplier,
                                 target_lang=region.target_lang,
@@ -1379,13 +1304,13 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             region.translation = no_br_result.text_with_br
                             layout_target_font_size = int(no_br_result.font_size)
                             logger.debug(
-                                f"balloon_fill region {region_idx}: no_br layout merged, segments={no_br_result.n_segments}, "
-                                f"font={layout_target_font_size}, required={no_br_result.required_width:.1f}x{no_br_result.required_height:.1f}"
+                                f"balloon_fill region {region_idx}: line-driven no_br layout, seed_segments={seed_segments}, "
+                                f"result_segments={no_br_result.n_segments}, font={layout_target_font_size}, "
+                                f"required={no_br_result.required_width:.1f}x{no_br_result.required_height:.1f}"
                             )
 
                         preferred_font_size = _apply_final_font_constraints(layout_target_font_size, config)
                         preferred_font_size_for_debug = preferred_font_size
-                        configured_fixed_font_size = _resolve_configured_fixed_font_size(config)
                         if configured_fixed_font_size > 0:
                             min_font_size = max(min_font_size, preferred_font_size)
 
@@ -1422,27 +1347,22 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                                 f"balloon_fill region {region_idx}: enclosed lines, binary-search font {preferred_font_size}->{chosen_font_size}"
                             )
                         else:
-                            chosen_font_size = preferred_font_size
-                            chosen_dst_points = preferred_dst_points
+                            chosen_font_size = int(max(min_font_size, 1))
+                            chosen_dst_points = _calc_region_dst_points_for_font(
+                                region=region,
+                                font_size=chosen_font_size,
+                                render_horizontally=render_horizontally,
+                                line_spacing_multiplier=line_spacing_multiplier,
+                                letter_spacing_multiplier=letter_spacing_multiplier,
+                                config=config,
+                                anchor_mode=normal_anchor_mode,
+                            )
                             if chosen_dst_points is None:
-                                chosen_dst_points = _calc_region_dst_points_for_font(
-                                    region=region,
-                                    font_size=chosen_font_size,
-                                    render_horizontally=render_horizontally,
-                                    line_spacing_multiplier=line_spacing_multiplier,
-                                    letter_spacing_multiplier=letter_spacing_multiplier,
-                                    config=config,
-                                    anchor_mode=normal_anchor_mode,
-                                )
-                            if min_font_size > 1:
-                                logger.debug(
-                                    f"balloon_fill region {region_idx}: no mask-safe layout at configured min font "
-                                    f"{min_font_size}, keeping preferred_font_size={chosen_font_size}"
-                                )
-                            else:
-                                logger.debug(
-                                    f"balloon_fill region {region_idx}: no mask-safe layout found, keeping preferred_font_size={chosen_font_size}"
-                                )
+                                chosen_font_size = preferred_font_size
+                                chosen_dst_points = preferred_dst_points
+                            logger.debug(
+                                f"balloon_fill region {region_idx}: no mask-safe layout found, shrink to font={chosen_font_size}"
+                            )
 
                     if chosen_dst_points is None:
                         chosen_dst_points = region.min_rect

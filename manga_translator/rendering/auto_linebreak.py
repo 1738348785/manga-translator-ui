@@ -13,9 +13,9 @@ from .text_render import (
     CJK_Compatibility_Forms_translate,
     calc_horizontal_block_height,
     compact_special_symbols,
-    get_char_glyph,
     get_char_offset_x,
     get_char_offset_y,
+    get_vertical_char_bitmap_width,
     get_string_width,
     select_hyphenator,
 )
@@ -83,8 +83,7 @@ def _vert_char_bitmap_width(font_size: int, cdpt: str) -> int:
     """单个字符的竖排字形实际宽度。"""
     cdpt_trans, _ = CJK_Compatibility_Forms_translate(cdpt, 1)
     try:
-        slot = get_char_glyph(cdpt_trans, font_size, 1)
-        return slot.bitmap.width or font_size
+        return get_vertical_char_bitmap_width(font_size, cdpt_trans)
     except Exception:
         return font_size
 
