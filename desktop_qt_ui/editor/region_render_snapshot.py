@@ -13,6 +13,24 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 
+def _resolve_effective_box_local(data: dict):
+    custom_box = data.get("white_frame_rect_local")
+    render_box = data.get("render_box_rect_local")
+    has_custom = bool(data.get("has_custom_white_frame", False))
+
+    if _is_rect_like(render_box):
+        return render_box
+    if has_custom and _is_rect_like(custom_box):
+        return custom_box
+    if _is_rect_like(custom_box):
+        return custom_box
+    return None
+
+
+def _is_rect_like(value) -> bool:
+    return isinstance(value, (list, tuple)) and len(value) == 4
+
+
 @dataclass
 class RegionRenderSnapshot:
     region_index: int
@@ -34,7 +52,7 @@ class RegionRenderSnapshot:
         # 优先合并 item 当前几何，避免"模型旧值"回流
         if geo_state is not None:
             try:
-                data.update(geo_state.to_region_data_patch())
+                data.update(geo_state.to_persisted_state_patch())
                 data["center"] = list(geo_state.center)
             except Exception:
                 pass
@@ -45,12 +63,12 @@ class RegionRenderSnapshot:
         cx, cy = float(center[0]), float(center[1])
         source_center = (cx, cy)
 
-        wf_local_raw = data.get("white_frame_rect_local")
+        wf_local_raw = _resolve_effective_box_local(data)
         white_frame_local = None
         white_frame_world = None
         render_center = source_center
 
-        if isinstance(wf_local_raw, (list, tuple)) and len(wf_local_raw) == 4:
+        if _is_rect_like(wf_local_raw):
             left, top, right, bottom = (float(v) for v in wf_local_raw)
             white_frame_local = (left, top, right, bottom)
 

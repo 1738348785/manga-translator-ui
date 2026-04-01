@@ -168,7 +168,28 @@ class EditorController(QObject):
         if 0 <= index < len(regions):
             return regions[index]
         return None
-    
+
+    def _merge_live_geometry_state(self, region_index: int, region_data: dict) -> dict:
+        """为样式类更新保留当前 item 的合法持久化几何状态。"""
+        if not isinstance(region_data, dict):
+            return region_data
+
+        try:
+            gv = getattr(self.view, "graphics_view", None) if self.view else None
+            if not gv or not hasattr(gv, "_region_items") or not (0 <= region_index < len(gv._region_items)):
+                return region_data
+
+            item = gv._region_items[region_index]
+            geo = getattr(item, "geo", None) if item is not None else None
+            if geo is None:
+                return region_data
+
+            merged_region_data = copy.deepcopy(region_data)
+            merged_region_data.update(geo.to_persisted_state_patch())
+            return merged_region_data
+        except Exception:
+            return region_data
+
     def set_view(self, view):
         """设置view引用，用于更新UI状态"""
         self.view = view
@@ -245,7 +266,11 @@ class EditorController(QObject):
                 continue
 
             old_region_data = self._get_region_by_index(index)
-            if not old_region_data or old_region_data.get("translation", "") == text:
+            if not old_region_data:
+                continue
+
+            old_region_data = self._merge_live_geometry_state(index, old_region_data)
+            if old_region_data.get("translation", "") == text:
                 continue
 
             new_region_data = old_region_data.copy()
@@ -1047,7 +1072,11 @@ class EditorController(QObject):
     @pyqtSlot(int, str)
     def update_translated_text(self, region_index: int, text: str):
         old_region_data = self._get_region_by_index(region_index)
-        if not old_region_data or old_region_data.get('translation') == text:
+        if not old_region_data:
+            return
+
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
+        if old_region_data.get('translation') == text:
             return
 
         new_region_data = old_region_data.copy()
@@ -1087,17 +1116,7 @@ class EditorController(QObject):
         if not old_region_data:
             return
 
-        # 以当前画布几何为准，避免属性面板改字号时把白框回滚到旧状态。
-        try:
-            gv = getattr(self.view, 'graphics_view', None) if self.view else None
-            if gv and hasattr(gv, '_region_items') and 0 <= region_index < len(gv._region_items):
-                item = gv._region_items[region_index]
-                if item is not None and hasattr(item, 'geo'):
-                    geo_patch = item.geo.to_region_data_patch()
-                    old_region_data = old_region_data.copy()
-                    old_region_data.update(geo_patch)
-        except Exception:
-            pass
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
 
         if old_region_data.get('font_size') == size:
             return
@@ -1117,7 +1136,11 @@ class EditorController(QObject):
     @pyqtSlot(int, str)
     def update_font_color(self, region_index: int, color: str):
         old_region_data = self._get_region_by_index(region_index)
-        if not old_region_data or old_region_data.get('font_color') == color:
+        if not old_region_data:
+            return
+
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
+        if old_region_data.get('font_color') == color:
             return
 
         new_region_data = old_region_data.copy()
@@ -1138,7 +1161,11 @@ class EditorController(QObject):
         c = QColor(hex_color)
         new_bg_colors = [c.red(), c.green(), c.blue()]
         old_region_data = self._get_region_by_index(region_index)
-        if not old_region_data or old_region_data.get('bg_colors') == new_bg_colors:
+        if not old_region_data:
+            return
+
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
+        if old_region_data.get('bg_colors') == new_bg_colors:
             return
 
         new_region_data = old_region_data.copy()
@@ -1156,7 +1183,11 @@ class EditorController(QObject):
     @pyqtSlot(int, float)
     def update_stroke_width(self, region_index: int, value: float):
         old_region_data = self._get_region_by_index(region_index)
-        if not old_region_data or old_region_data.get('stroke_width') == value:
+        if not old_region_data:
+            return
+
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
+        if old_region_data.get('stroke_width') == value:
             return
 
         new_region_data = old_region_data.copy()
@@ -1177,6 +1208,7 @@ class EditorController(QObject):
         if not old_region_data:
             return
 
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
         current_value = old_region_data.get('line_spacing')
         if current_value is None:
             current_value = self.config_service.get_config().render.line_spacing or 1.0
@@ -1201,6 +1233,7 @@ class EditorController(QObject):
         if not old_region_data:
             return
 
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
         current_value = old_region_data.get('letter_spacing')
         if current_value is None:
             current_value = self.config_service.get_config().render.letter_spacing or 1.0
@@ -1234,6 +1267,8 @@ class EditorController(QObject):
         old_region_data = self._get_region_by_index(region_index)
         if not old_region_data:
             return
+
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
         
         # Convert selected value to region font_path
         if font_filename:
@@ -1301,7 +1336,11 @@ class EditorController(QObject):
                 alignment_value = fallback_map.get(raw_text, "auto")
 
         old_region_data = self._get_region_by_index(region_index)
-        if not old_region_data or old_region_data.get('alignment') == alignment_value:
+        if not old_region_data:
+            return
+
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
+        if old_region_data.get('alignment') == alignment_value:
             return
 
         new_region_data = old_region_data.copy()
@@ -1363,7 +1402,11 @@ class EditorController(QObject):
                 direction_value = "horizontal"
 
         old_region_data = self._get_region_by_index(region_index)
-        if not old_region_data or old_region_data.get('direction') == direction_value:
+        if not old_region_data:
+            return
+
+        old_region_data = self._merge_live_geometry_state(region_index, old_region_data)
+        if old_region_data.get('direction') == direction_value:
             return
 
         new_region_data = old_region_data.copy()
@@ -1764,13 +1807,13 @@ class EditorController(QObject):
 
     @staticmethod
     def _apply_white_frame_center(region: dict):
-        """若存在白框局部坐标，将白框中心世界坐标覆盖写入 region['center']。
+        """若存在有效框局部坐标，将其中心世界坐标覆盖写入 region['center']。
 
         region_data 里 center 是旋转中心，white_frame_rect_local 是以 center
         为原点、angle 为旋转角度的局部坐标 [left, top, right, bottom]。
         白框中心世界坐标 = center + local_to_world(wf_cx, wf_cy)。
         """
-        wf_local = region.get('white_frame_rect_local')
+        wf_local = EditorController._resolve_effective_box_local(region)
         base_center = region.get('center')
         if not (
             isinstance(wf_local, (list, tuple)) and len(wf_local) == 4 and
@@ -1789,6 +1832,23 @@ class EditorController(QObject):
                                  cy + lx * sin_a + ly * cos_a]
         except (TypeError, ValueError):
             pass
+
+    @staticmethod
+    def _resolve_effective_box_local(region: dict):
+        if not isinstance(region, dict):
+            return None
+
+        custom_box = region.get('white_frame_rect_local')
+        render_box = region.get('render_box_rect_local')
+        has_custom = bool(region.get('has_custom_white_frame', False))
+
+        if isinstance(render_box, (list, tuple)) and len(render_box) == 4:
+            return render_box
+        if isinstance(custom_box, (list, tuple)) and len(custom_box) == 4 and has_custom:
+            return custom_box
+        if isinstance(custom_box, (list, tuple)) and len(custom_box) == 4:
+            return custom_box
+        return None
 
     def _resolve_editor_json_path(self, source_path: str) -> str:
         """解析编辑器当前图片对应的 JSON 路径。"""

@@ -318,9 +318,9 @@ class TextBlock(object):
         # 保存时走一遍对比度检查，确保 fg/bg 颜色有足够差异
         fg_out, bg_out = self.get_font_colors()
 
-        # 如果渲染管线已计算出 dst_points，将其转为 white_frame_rect_local 保存
-        # 编辑器加载时会用此字段算出 render_center，确保编辑器白框与最终渲染位置一致
-        white_frame_extra = {}
+        # 如果渲染管线已计算出 dst_points，将其转为 render_box_rect_local 保存。
+        # 这是样式计算后的渲染框，不等同于用户手动白框。
+        render_box_extra = {}
         if hasattr(self, 'dst_points') and self.dst_points is not None:
             try:
                 pts_world = np.array(self.dst_points).reshape(-1, 2)
@@ -340,9 +340,8 @@ class TextBlock(object):
                                             local_pts[3, 1] - local_pts[0, 1]))
                     if width > 0 and height > 0:
                         hw, hh = width / 2.0, height / 2.0
-                        white_frame_extra = {
-                            'white_frame_rect_local': [cpx - hw, cpy - hh, cpx + hw, cpy + hh],
-                            'has_custom_white_frame': True,
+                        render_box_extra = {
+                            'render_box_rect_local': [cpx - hw, cpy - hh, cpx + hw, cpy + hh],
                         }
             except Exception:
                 pass
@@ -367,7 +366,7 @@ class TextBlock(object):
             'prob': self.prob,
             'font_path': getattr(self, 'font_path', ''),  # 区域特定字体路径（空字符串=使用全局默认字体）
         }
-        result.update(white_frame_extra)
+        result.update(render_box_extra)
         return result
 
     def get_transformed_region(self, img: np.ndarray, line_idx: int, textheight: int, maxwidth: int = None) -> np.ndarray:

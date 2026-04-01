@@ -1658,7 +1658,13 @@ class PropertyPanel(QWidget):
     def _calculate_white_frame_info(self, region_data):
         """计算白框中心世界坐标和宽高，返回 (cx, cy, w, h) 或 None。"""
         import math
-        wf_local = region_data.get('white_frame_rect_local')
+        has_custom = bool(region_data.get('has_custom_white_frame', False))
+        wf_local = None
+        wf_local = region_data.get('render_box_rect_local')
+        if not wf_local and has_custom:
+            wf_local = region_data.get('white_frame_rect_local')
+        if not wf_local:
+            wf_local = region_data.get('white_frame_rect_local')
         center = region_data.get('center')
         angle = float(region_data.get('angle', 0))
 

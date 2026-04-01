@@ -1,4 +1,4 @@
-
+import copy
 import cv2
 import numpy as np
 
@@ -6,6 +6,7 @@ import numpy as np
 from editor import text_renderer_backend
 from editor.editor_model import EditorModel
 from editor.graphics_items import RegionTextItem, TransparentPixmapItem
+from editor.region_geometry_state import RegionGeometryState
 from editor.region_render_snapshot import RegionRenderSnapshot
 from editor.render_layout_pipeline import (
     build_region_specific_params,
@@ -563,7 +564,7 @@ class GraphicsView(QGraphicsView):
                     and self._region_geometry_matches_item(region_data, item)
                 ):
                     try:
-                        region_for_item.update(item.geo.to_region_data_patch())
+                        region_for_item.update(item.geo.to_persisted_state_patch())
                         region_for_item["center"] = list(item.geo.center)
                     except Exception:
                         pass
@@ -605,7 +606,7 @@ class GraphicsView(QGraphicsView):
                 return False
 
             model_wf = region_data.get("white_frame_rect_local")
-            item_wf = item.geo.white_frame_local
+            item_wf = item.geo.custom_white_frame_local
             if model_wf is None and item_wf is None:
                 return True
             return self._values_equal(model_wf, item_wf)
@@ -652,6 +653,74 @@ class GraphicsView(QGraphicsView):
             self._dst_points_cache.append(None)
         while len(self._render_snapshot_cache) <= index:
             self._render_snapshot_cache.append(None)
+
+    def _build_render_box_patch(self, region_data: dict, dst_points) -> dict:
+        geo_state = RegionGeometryState.from_region_data(region_data)
+        geo_state.set_render_box(dst_points)
+        return geo_state.to_render_box_patch()
+
+    def _persist_single_render_box(self, index: int, dst_points):
+        regions = self.model.get_regions()
+        if not (0 <= index < len(regions)):
+            return
+
+        region_data = copy.deepcopy(regions[index])
+        if not isinstance(region_data, dict):
+            return
+
+        patch = self._build_render_box_patch(region_data, dst_points)
+        new_render_box = patch.get("render_box_rect_local")
+        needs_legacy_clear = (
+            not region_data.get("has_custom_white_frame", False)
+            and region_data.get("white_frame_rect_local") is not None
+        )
+        if (
+            self._values_equal(region_data.get("render_box_rect_local"), new_render_box)
+            and not needs_legacy_clear
+        ):
+            return
+
+        region_data.update(patch)
+        if not region_data.get("has_custom_white_frame", False):
+            region_data.pop("white_frame_rect_local", None)
+
+        updated_regions = list(regions)
+        updated_regions[index] = region_data
+        self.model.set_regions_silent(updated_regions)
+
+    def _persist_render_boxes(self, regions: list[dict], dst_points_list: list):
+        if not regions:
+            return
+
+        updated_regions = [copy.deepcopy(region) for region in regions]
+        changed = False
+
+        for index, dst_points in enumerate(dst_points_list):
+            if not (0 <= index < len(updated_regions)):
+                continue
+            region_data = updated_regions[index]
+            if not isinstance(region_data, dict):
+                continue
+
+            patch = self._build_render_box_patch(region_data, dst_points)
+            new_render_box = patch.get("render_box_rect_local")
+            needs_legacy_clear = (
+                not region_data.get("has_custom_white_frame", False)
+                and region_data.get("white_frame_rect_local") is not None
+            )
+            if (
+                self._values_equal(region_data.get("render_box_rect_local"), new_render_box)
+                and not needs_legacy_clear
+            ):
+                continue
+
+            region_data.update(patch)
+            if not region_data.get("has_custom_white_frame", False):
+                region_data.pop("white_frame_rect_local", None)
+            changed = True
+
+        if changed:
+            self.model.set_regions_silent(updated_regions)
 
     def _build_render_snapshot(self, index: int, region_data: dict, item: RegionTextItem | None) -> RegionRenderSnapshot:
         geo_state = item.geo if (item is not None and hasattr(item, "geo")) else None
@@ -866,6 +935,8 @@ class GraphicsView(QGraphicsView):
             traceback.print_exc()
             self._dst_points_cache[index] = None
 
+        self._persist_single_render_box(index, self._dst_points_cache[index])
+
     def _update_single_region_text_visual(self, index, use_cache=False):
         """重新渲染单个区域的文字"""
         try:
@@ -940,6 +1011,7 @@ class GraphicsView(QGraphicsView):
                 dst_points_list.append(None)
 
         self._dst_points_cache = dst_points_list
+        self._persist_render_boxes(regions, dst_points_list)
         self._update_text_visuals()
         self.scene.update()
     
