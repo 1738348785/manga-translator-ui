@@ -2040,6 +2040,7 @@ class EditorController(QObject):
 
                     # 导出成功后释放内存
                     self.resource_manager.release_memory_after_export()
+                    self.resource_manager.release_image_cache_except_current()
                 else:
                     self.logger.debug("Skipped export snapshot update because active image changed during export")
 

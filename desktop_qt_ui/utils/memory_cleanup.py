@@ -180,13 +180,27 @@ def cleanup_physical_memory():
     """
     释放物理内存（Windows特定）
     
-    在Windows上调用SetProcessWorkingSetSize强制释放物理内存。
+    在Windows上优先调用 EmptyWorkingSet 强制释放物理内存，
+    再回退到 SetProcessWorkingSetSize。
     对CPU模式特别重要。
     """
     try:
         import ctypes
-        ctypes.windll.kernel32.SetProcessWorkingSetSize(-1, -1, -1)
-        return True
+        import os
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        process_handle = kernel32.OpenProcess(0x0400 | 0x0100, False, os.getpid())
+        if not process_handle:
+            return False
+
+        try:
+            if hasattr(psapi, "EmptyWorkingSet") and psapi.EmptyWorkingSet(process_handle):
+                return True
+            if kernel32.SetProcessWorkingSetSize(process_handle, -1, -1):
+                return True
+        finally:
+            kernel32.CloseHandle(process_handle)
     except Exception:
         pass  # 非Windows系统忽略
     return False

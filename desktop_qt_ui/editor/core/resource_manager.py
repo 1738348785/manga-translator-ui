@@ -29,6 +29,48 @@ def _release_gpu_memory():
         pass
 
 
+def _trim_working_set() -> bool:
+    """提示 Windows 回收当前进程工作集。"""
+    try:
+        import ctypes
+        import os
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        process_id = os.getpid()
+        process_handle = kernel32.OpenProcess(0x0400 | 0x0100, False, process_id)
+        if not process_handle:
+            return False
+
+        empty_working_set_ok = False
+        try:
+            if hasattr(psapi, "EmptyWorkingSet"):
+                empty_working_set_ok = bool(psapi.EmptyWorkingSet(process_handle))
+                if empty_working_set_ok:
+                    return True
+
+            set_ws_ok = bool(kernel32.SetProcessWorkingSetSize(process_handle, -1, -1))
+            if set_ws_ok:
+                return True
+            return False
+        finally:
+            kernel32.CloseHandle(process_handle)
+    except Exception:
+        return False
+
+
+def _current_process_memory_bytes() -> int:
+    try:
+        import psutil
+
+        info = psutil.Process(os.getpid()).memory_info()
+        rss = getattr(info, "rss", 0) or 0
+        wset = getattr(info, "wset", 0) or 0
+        return max(rss, wset)
+    except Exception:
+        return 0
+
+
 class ResourceManager:
     """资源管理器
     
@@ -51,6 +93,7 @@ class ResourceManager:
         
         # 通用缓存（用于存储临时数据）
         self._temp_cache: Dict[str, any] = {}
+        self._export_cleanup_threshold_bytes = 2 * 1024 * 1024 * 1024
     
     # ==================== 图片管理 ====================
 
@@ -147,6 +190,23 @@ class ResourceManager:
         pass
         _release_gpu_memory()
         self.logger.info("Cleared all image cache")
+
+    def release_image_cache_except_current(self) -> int:
+        """只保留当前图，释放 image_cache 中的其他图片。"""
+        if _current_process_memory_bytes() < self._export_cleanup_threshold_bytes:
+            return 0
+
+        current_path = self._current_image.path if self._current_image is not None else None
+        removed = 0
+
+        for path in list(self._image_cache.keys()):
+            if path == current_path:
+                continue
+            resource = self._image_cache.pop(path, None)
+            if resource is not None:
+                resource.release()
+                removed += 1
+        return removed
     
     def unload_image(self, release_from_cache: bool = False) -> None:
         """卸载当前图片及所有关联资源
@@ -344,17 +404,19 @@ class ResourceManager:
         
         清理临时缓存和GPU显存，但保留图片缓存以便快速切换
         """
-        self.logger.info("Releasing memory after export")
-        
+        if _current_process_memory_bytes() < self._export_cleanup_threshold_bytes:
+            return
+
         # 清空临时缓存（inpainted图片等）
         self._temp_cache.clear()
         
         # 强制垃圾回收
-        pass
+        import gc
+        gc.collect()
         # 释放GPU显存
         _release_gpu_memory()
-        
-        self.logger.info("Memory released after export")
+
+        _trim_working_set()
     
     def __del__(self):
         """析构函数"""
