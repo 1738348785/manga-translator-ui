@@ -128,7 +128,8 @@ _QT_FONT_PROBE_SIZE = 32.0
 _thread_state = threading.local()
 _qt_runtime_lock = threading.Lock()
 _qt_runtime_app = None
-_font_family_cache = {}
+_font_descriptor_cache = {}
+_font_registration_cache = {}
 _hyphenator_cache = {}
 _RAW_FONT_CACHE_MAX = 128
 _QFONT_CACHE_MAX = 192
@@ -156,6 +157,12 @@ class GlyphRaster:
     advance_y: int
     vert_bearing_y: int
     frame_width: int
+
+
+@dataclass(frozen=True)
+class LayoutFontDescriptor:
+    family: str
+    style: str = ''
 
 
 @dataclass
@@ -368,25 +375,46 @@ def _raw_font(path: str, pixel_size: float) -> QRawFont:
     return font
 
 
-def _font_family(path: str) -> str:
+def _font_descriptor(path: str) -> LayoutFontDescriptor:
     _ensure_qt_runtime()
     path = _normalize_font_path(path)
-    family = _font_family_cache.get(path)
-    if family:
-        return family
-    font_id = QFontDatabase.addApplicationFont(path)
-    if font_id != -1:
-        families = QFontDatabase.applicationFontFamilies(font_id)
-        if families:
-            family = families[0]
-    if not family:
-        raw = QRawFont(path, _QT_FONT_PROBE_SIZE)
+    descriptor = _font_descriptor_cache.get(path)
+    if descriptor:
+        return descriptor
+
+    if path not in _font_registration_cache:
+        try:
+            _font_registration_cache[path] = QFontDatabase.addApplicationFont(path)
+        except Exception:
+            _font_registration_cache[path] = -1
+
+    family = ''
+    style = ''
+    try:
+        raw = _raw_font(path, _QT_FONT_PROBE_SIZE)
         if raw.isValid():
-            family = raw.familyName()
+            family = raw.familyName() or ''
+            style = raw.styleName() or ''
+    except Exception:
+        pass
+
+    if not family:
+        font_id = _font_registration_cache.get(path, -1)
+        if font_id != -1:
+            families = QFontDatabase.applicationFontFamilies(font_id)
+            if families:
+                family = families[0]
+        if not family:
+            raw = QRawFont(path, _QT_FONT_PROBE_SIZE)
+            if raw.isValid():
+                family = raw.familyName() or ''
+                style = style or raw.styleName() or ''
+
     if not family:
         raise RuntimeError(f'Could not resolve Qt font family: {path}')
-    _font_family_cache[path] = family
-    return family
+    descriptor = LayoutFontDescriptor(family=family, style=style)
+    _font_descriptor_cache[path] = descriptor
+    return descriptor
 
 
 def _refresh_font_selection(state: FontState):
@@ -424,29 +452,45 @@ def set_font(path: str):
     _refresh_font_selection(state)
 
 
-def _layout_families(state: FontState) -> Tuple[str, ...]:
+def _layout_font_descriptor(state: FontState) -> Tuple[Tuple[str, ...], str]:
     families, seen = [], set()
-    for path in state.font_selection or [state.font or DEFAULT_FONT]:
+    primary_style = ''
+    selection = state.font_selection or [state.font or DEFAULT_FONT]
+    for index, path in enumerate(selection):
         try:
-            family = _font_family(path)
+            descriptor = _font_descriptor(path)
         except Exception as exc:
             logger.error(f'Failed to resolve layout font family: {path} - {exc}')
             continue
-        if family and family not in seen:
-            seen.add(family)
-            families.append(family)
-    return tuple(families or [_font_family(_resolve_existing_font_path(DEFAULT_FONT))])
+        if index == 0 and descriptor.style:
+            primary_style = descriptor.style
+        if descriptor.family and descriptor.family not in seen:
+            seen.add(descriptor.family)
+            families.append(descriptor.family)
+
+    if families:
+        return tuple(families), primary_style
+
+    fallback_path = _resolve_existing_font_path(DEFAULT_FONT)
+    fallback_descriptor = _font_descriptor(fallback_path)
+    return (fallback_descriptor.family,), fallback_descriptor.style
 
 
 def _layout_font(font_size: int, letter_spacing: float) -> QFont:
     state = _state()
-    families = _layout_families(state)
-    key = (families, int(max(font_size, 1)), round(float(letter_spacing), 4))
+    families, primary_style = _layout_font_descriptor(state)
+    font_paths = tuple(
+        _normalize_font_path(path)
+        for path in (state.font_selection or [state.font or DEFAULT_FONT])
+    )
+    key = (font_paths, primary_style, int(max(font_size, 1)), round(float(letter_spacing), 4))
     qfont = _cache_get(state.qfonts, key)
     if qfont is None:
         qfont = QFont()
         qfont.setFamilies(list(families))
-        qfont.setPixelSize(key[1])
+        if primary_style:
+            qfont.setStyleName(primary_style)
+        qfont.setPixelSize(key[2])
         qfont.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
         qfont.setStyleStrategy(QFont.StyleStrategy.PreferOutline)
         qfont.setKerning(True)
@@ -557,7 +601,7 @@ def _glyph_spec(cdpt: str, font_size: int) -> GlyphSpec:
     cached = _cache_get(state.glyph_specs, key)
     if cached is not None:
         return cached
-    spec = _glyph_spec_via_layout(cdpt, font_size) or _glyph_spec_from_selection(cdpt, font_size)
+    spec = _glyph_spec_from_selection(cdpt, font_size) or _glyph_spec_via_layout(cdpt, font_size)
     if spec is None:
         if cdpt in (' ', '?', '□'):
             raise RuntimeError(f"Character '{cdpt}' not found in any font.")

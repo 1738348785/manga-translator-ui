@@ -3,7 +3,7 @@ import os
 import shutil
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QBrush, QColor, QFontDatabase
+from PyQt6.QtGui import QBrush, QColor, QFontDatabase, QRawFont
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QFileDialog,
@@ -39,6 +39,7 @@ _SETTINGS_TAB_LAYOUT_FILE = os.path.join(
 _PROMPT_EXTENSIONS = (".yaml", ".yml", ".json")
 _FONT_EXTENSIONS = (".ttf", ".otf", ".ttc")
 _CURRENT_ASSET_PREFIX = "✓ "
+_FONT_PREVIEW_FACE_CACHE = {}
 
 
 def _load_reclassify_settings_layout():
@@ -58,6 +59,36 @@ def _font_preview_style(size: int, family_name: str | None = None) -> str:
     if family_name:
         parts.insert(0, f"font-family: '{family_name}'")
     return "; ".join(parts) + ";"
+
+
+def _get_font_preview_face(font_path: str) -> tuple[str | None, str | None]:
+    cached = _FONT_PREVIEW_FACE_CACHE.get(font_path)
+    if cached is not None:
+        return cached
+
+    family_name = None
+    style_name = None
+
+    try:
+        font_id = QFontDatabase.addApplicationFont(font_path)
+        if font_id >= 0:
+            families = QFontDatabase.applicationFontFamilies(font_id)
+            if families:
+                family_name = families[0]
+    except Exception:
+        pass
+
+    try:
+        raw_font = QRawFont(font_path, 32)
+        if raw_font.isValid():
+            family_name = raw_font.familyName() or family_name
+            style_name = raw_font.styleName() or None
+    except Exception:
+        pass
+
+    result = (family_name, style_name)
+    _FONT_PREVIEW_FACE_CACHE[font_path] = result
+    return result
 
 
 def refresh_font_preview_styles(self):
@@ -1488,6 +1519,7 @@ def _on_font_selection_changed(self, current, previous):
         for lbl in self.font_preview_labels:
             size = lbl.property("previewSize") or 14
             lbl.setStyleSheet(_font_preview_style(size))
+            lbl.setFont(self.font())
         return
 
     font_filename = _get_asset_item_filename(current)
@@ -1498,24 +1530,26 @@ def _on_font_selection_changed(self, current, previous):
     if hasattr(self, "font_preview_name_label"):
         self.font_preview_name_label.setText(font_filename)
 
-    # 加载字体文件并通过 stylesheet 应用预览
+    # 读取字体 family/style，并按具体样式创建预览字体
     family_name = None
+    style_name = None
     try:
         fonts_dir = resource_path("fonts")
         font_path = os.path.join(fonts_dir, font_filename)
         if os.path.isfile(font_path):
-            font_id = QFontDatabase.addApplicationFont(font_path)
-            if font_id >= 0:
-                families = QFontDatabase.applicationFontFamilies(font_id)
-                if families:
-                    family_name = families[0]
+            family_name, style_name = _get_font_preview_face(font_path)
     except Exception:
         pass
 
-    # 通过 stylesheet 设置字体（这是在有全局 stylesheet 时唯一可靠的方式）
+    # 同一个 widget 的 stylesheet 这里只保留颜色和字号，family/style 交给 setFont
     for lbl in self.font_preview_labels:
         size = lbl.property("previewSize") or 14
+        lbl.setStyleSheet(_font_preview_style(size, family_name))
         if family_name:
-            lbl.setStyleSheet(_font_preview_style(size, family_name))
-        else:
-            lbl.setStyleSheet(_font_preview_style(size))
+            preview_font = QFontDatabase.font(family_name, style_name or "", int(size))
+            if style_name:
+                preview_font.setStyleName(style_name)
+            if preview_font.family():
+                lbl.setFont(preview_font)
+                continue
+        lbl.setFont(self.font())
