@@ -48,8 +48,8 @@ class NoBrLayoutResult:
     required_height: float
 
 
-def _normalize_no_br_text(text: str) -> str:
-    text = compact_special_symbols(text or "")
+def _normalize_no_br_text(text: str, horizontal: bool = False) -> str:
+    text = compact_special_symbols(text or "", convert_ascii_ellipsis=not horizontal)
     return re.sub(r"\s*(\[BR\]|<br>|【BR】)\s*", "", text, flags=re.IGNORECASE)
 
 
@@ -866,14 +866,23 @@ def _measure_required_size(
         lines, widths = _calc_horizontal_layout(font_size, text_with_br, 99999, target_lang, hyphenate, letter_spacing=letter_spacing_multiplier)
         n = max(1, len(lines))
         spacing_y = text_render.calc_horizontal_line_spacing_px(font_size, line_spacing_multiplier)
-        required_width = max(widths) if widths else get_string_width(font_size, _normalize_no_br_text(text_with_br), letter_spacing=letter_spacing_multiplier)
+        required_width = max(widths) if widths else get_string_width(
+            font_size,
+            _normalize_no_br_text(text_with_br, horizontal=True),
+            letter_spacing=letter_spacing_multiplier,
+        )
         required_height = font_size * n + spacing_y * max(0, n - 1)
         return n, float(required_width), float(required_height)
 
     lines, heights = _calc_vertical_layout(font_size, text_with_br, 99999, config, letter_spacing=letter_spacing_multiplier)
     n = max(1, len(lines))
     spacing_x = int(font_size * 0.2 * line_spacing_multiplier)
-    required_height = max(heights) if heights else _vert_total_height(_normalize_no_br_text(text_with_br), font_size, config=config, letter_spacing=letter_spacing_multiplier)
+    required_height = max(heights) if heights else _vert_total_height(
+        _normalize_no_br_text(text_with_br, horizontal=False),
+        font_size,
+        config=config,
+        letter_spacing=letter_spacing_multiplier,
+    )
     # 精确计算各列实际字形宽度之和，与 put_text_vertical 的 line_widths 逻辑一致
     line_widths = [_vert_line_width(line, font_size) for line in lines]
     required_width = sum(line_widths) + spacing_x * max(0, n - 1)
@@ -887,7 +896,7 @@ def _measure_unwrapped_required_size(
     config: Any = None,
     letter_spacing_multiplier: float = 1.0,
 ) -> Tuple[int, float, float]:
-    clean_text = _normalize_no_br_text(text)
+    clean_text = _normalize_no_br_text(text, horizontal=horizontal)
     if not clean_text:
         return 1, 0.0, 0.0
 
@@ -945,7 +954,7 @@ def solve_no_br_layout(
     letter_spacing_multiplier: float = 1.0,
     adjust_font_size: bool = True,
 ) -> NoBrLayoutResult:
-    clean_text = _normalize_no_br_text(text)
+    clean_text = _normalize_no_br_text(text, horizontal=horizontal)
     if not clean_text:
         return NoBrLayoutResult("", max(1, min_font_size), 1, 0.0, 0.0)
     current_region = getattr(config, "_current_region", None) if config is not None else None

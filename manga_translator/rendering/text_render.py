@@ -194,10 +194,12 @@ def _compact_period_run(match: re.Match[str]) -> str:
     return ('…' * ellipsis_count) + ('.' * remainder)
 
 
-def compact_special_symbols(text: str) -> str:
+def compact_special_symbols(text: str, *, convert_ascii_ellipsis: bool = True) -> str:
     text = text or ''
+    if not convert_ascii_ellipsis:
+        return text
     # Preserve author-entered spaces. Only normalize runs of ASCII periods so
-    # baseline rendering can use the ellipsis glyph without collapsing groups.
+    # vertical rendering and explicit ellipsis compaction can share one path.
     return re.sub(r'\.{3,}', _compact_period_run, text)
 
 
@@ -1042,7 +1044,7 @@ def put_char_horizontal(font_size: int, cdpt: str, pen_l: Tuple[int, int], canva
 
 
 def put_text_horizontal(font_size: int, text: str, width: int, height: int, alignment: str, reversed_direction: bool, fg: Tuple[int, int, int], bg: Tuple[int, int, int], lang: str = 'en_US', hyphenate: bool = True, line_spacing: int = 0, config=None, region_count: int = 1, stroke_width: float = None, letter_spacing: float = 1.0):
-    text = compact_special_symbols(text)
+    text = compact_special_symbols(text, convert_ascii_ellipsis=False)
     if not text:
         return None
     _ = (width, height, lang, hyphenate, region_count)
