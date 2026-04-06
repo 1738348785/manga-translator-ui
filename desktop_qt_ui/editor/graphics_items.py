@@ -655,8 +655,6 @@ class RegionTextItem(QGraphicsItemGroup):
         if scene is None or not guide_specs:
             return
             
-        import math
-        
         # 计算所有视图的可视区域并取并集
         visible_rect = None
         views = scene.views()
