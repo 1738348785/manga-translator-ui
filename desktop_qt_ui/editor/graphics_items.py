@@ -18,6 +18,7 @@
 import copy
 import logging
 import traceback
+import math
 from typing import List
 
 import numpy as np
@@ -32,13 +33,16 @@ from editor.geometry_commit_pipeline import (
 )
 from editor.region_geometry_state import RegionGeometryState
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QBrush, QColor, QCursor, QPainter, QPainterPath, QPen, QPolygonF
+from PyQt6.QtGui import QBrush, QColor, QCursor, QFont, QPainter, QPainterPath, QPen, QPolygonF
 from PyQt6.QtWidgets import (
     QGraphicsItem,
     QGraphicsItemGroup,
+    QGraphicsLineItem,
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsSceneMouseEvent,
+    QGraphicsSimpleTextItem,
+    QInputDialog,
     QStyle,
 )
 
@@ -124,6 +128,13 @@ class RegionTextItem(QGraphicsItemGroup):
         self._polygons_visible = True
         self._show_white_box = True
         self._shape_path = None
+
+        # 旋转角度标签（场景级别，懒加载）
+        self._angle_label = None
+        # 对齐辅助线（场景级别）
+        self._guide_lines = []
+        # 吸附阈值（像素）
+        self._snap_threshold = 1.0
 
         self._setup_pens()
 
@@ -333,6 +344,10 @@ class RegionTextItem(QGraphicsItemGroup):
             if change == QGraphicsItem.GraphicsItemChange.ItemSelectedChange:
                 self.prepareGeometryChange()
                 self._shape_path = None
+            elif change == QGraphicsItem.GraphicsItemChange.ItemSceneChange:
+                if value is None:
+                    self._remove_angle_label()
+                    self._clear_guide_lines()
         except Exception as e:
             logger.error(f"[RegionTextItem] itemChange: {e}")
         return super().itemChange(change, value)
@@ -345,25 +360,25 @@ class RegionTextItem(QGraphicsItemGroup):
         wf = self.geo.white_frame_local
         if wf is None:
             return []
-        l, t, r, b = wf
-        return [QPointF(l, t), QPointF(r, t), QPointF(r, b), QPointF(l, b)]
+        left, top, right, bottom = wf
+        return [QPointF(left, top), QPointF(right, top), QPointF(right, bottom), QPointF(left, bottom)]
 
     def _white_edge_points(self) -> list:
         wf = self.geo.white_frame_local
         if wf is None:
             return []
-        l, t, r, b = wf
+        left, top, right, bottom = wf
         return [
-            QPointF((l + r) / 2, t), QPointF(r, (t + b) / 2),
-            QPointF((l + r) / 2, b), QPointF(l, (t + b) / 2),
+            QPointF((left + right) / 2, top), QPointF(right, (top + bottom) / 2),
+            QPointF((left + right) / 2, bottom), QPointF(left, (top + bottom) / 2),
         ]
 
     def _draw_white_box(self, painter, is_selected: bool):
         wf = self.geo.white_frame_local
         if wf is None:
             return
-        l, t, r, b = wf
-        poly = QPolygonF([QPointF(l, t), QPointF(r, t), QPointF(r, b), QPointF(l, b)])
+        left, top, right, bottom = wf
+        poly = QPolygonF([QPointF(left, top), QPointF(right, top), QPointF(right, bottom), QPointF(left, bottom)])
 
         if is_selected:
             painter.setPen(QPen(QColor(0, 255, 255), 4))
@@ -407,11 +422,11 @@ class RegionTextItem(QGraphicsItemGroup):
         lod = self._lod()
         hs = 10.0 / lod
         if self.geo.white_frame_local is not None:
-            l, t, r, b = self.geo.white_frame_local
-            cx = (l + r) / 2
-            cy = (t + b) / 2
+            left, top, right, bottom = self.geo.white_frame_local
+            cx = (left + right) / 2
+            cy = (top + bottom) / 2
             center = QPointF(cx, cy)
-            rot_pos = QPointF(cx, t - 40.0 / lod)
+            rot_pos = QPointF(cx, top - 40.0 / lod)
         else:
             center = QPointF(0, 0)
             rot_pos = QPointF(0, -40.0 / lod)
@@ -433,8 +448,8 @@ class RegionTextItem(QGraphicsItemGroup):
     def _rotation_pivot_local(self) -> QPointF:
         """旋转支点：白框中心（回退到局部原点）。"""
         if self.geo.white_frame_local is not None:
-            l, t, r, b = self.geo.white_frame_local
-            return QPointF((l + r) / 2, (t + b) / 2)
+            left, top, right, bottom = self.geo.white_frame_local
+            return QPointF((left + right) / 2, (top + bottom) / 2)
         return QPointF(0, 0)
 
     def _core_polygon_path(self) -> QPainterPath:
@@ -467,12 +482,12 @@ class RegionTextItem(QGraphicsItemGroup):
         x, y = point
         return rotate_point(x, y, angle, cx, cy) if angle != 0 else (x, y)
 
-    def _white_edge_world_points(self, l: float, t: float, r: float, b: float, cx: float, cy: float) -> list[tuple[float, float]]:
+    def _white_edge_world_points(self, left: float, top: float, right: float, bottom: float, cx: float, cy: float) -> list[tuple[float, float]]:
         return [
-            ((l + r) / 2.0 + cx, t + cy),
-            (r + cx, (t + b) / 2.0 + cy),
-            ((l + r) / 2.0 + cx, b + cy),
-            (l + cx, (t + b) / 2.0 + cy),
+            ((left + right) / 2.0 + cx, top + cy),
+            (right + cx, (top + bottom) / 2.0 + cy),
+            ((left + right) / 2.0 + cx, bottom + cy),
+            (left + cx, (top + bottom) / 2.0 + cy),
         ]
 
     def _clear_drag_context(self):
@@ -486,6 +501,8 @@ class RegionTextItem(QGraphicsItemGroup):
         self._interaction_mode = "none"
         self._is_dragging = False
         self._clear_drag_context()
+        self._hide_angle_label()
+        self._clear_guide_lines()
 
     def _capture_white_frame_drag_context(self, *, capture_text_pos: bool = False):
         self._drag_start_white_frame_local = (
@@ -494,6 +511,314 @@ class RegionTextItem(QGraphicsItemGroup):
         self._drag_start_white_handle_world = None
         if capture_text_pos:
             self._drag_start_text_item_pos = QPointF(self.text_item.pos())
+
+    # ------------------------------------------------------------------
+    # 旋转角度显示
+    # ------------------------------------------------------------------
+
+    def _ensure_angle_label(self):
+        """确保角度标签存在（在场景中创建）。"""
+        if self._angle_label is not None:
+            return
+        scene = self.scene()
+        if scene is None:
+            return
+        self._angle_label = QGraphicsSimpleTextItem()
+        self._angle_label.setZValue(1000)
+        font = QFont("Arial", 12)
+        font.setBold(True)
+        self._angle_label.setFont(font)
+        self._angle_label.setBrush(QBrush(QColor(255, 255, 0)))
+        self._angle_label.setPen(QPen(QColor(0, 0, 0), 0.5))
+        scene.addItem(self._angle_label)
+        self._angle_label.setVisible(False)
+
+    def _show_angle_label(self, angle_deg: float, scene_pos: QPointF):
+        """在旋转位置显示当前的旋转角度标签。"""
+        self._ensure_angle_label()
+        if self._angle_label is None:
+            return
+        normalized = angle_deg % 360
+        if normalized > 180:
+            normalized -= 360
+        self._angle_label.setText(f"{normalized:.1f}°")
+        lod = self._lod()
+        scale = 1.0 / max(lod, 0.1)
+        self._angle_label.setScale(scale)
+        offset_x = 18.0 / max(lod, 0.1)
+        offset_y = -20.0 / max(lod, 0.1)
+        self._angle_label.setPos(scene_pos.x() + offset_x, scene_pos.y() + offset_y)
+        self._angle_label.setVisible(True)
+
+    def _hide_angle_label(self):
+        """隐藏旋转角度标签。"""
+        if self._angle_label is not None:
+            self._angle_label.setVisible(False)
+
+    def _remove_angle_label(self):
+        """从场景中移除角度标签。"""
+        if self._angle_label is not None:
+            scene = self.scene()
+            if scene is not None:
+                try:
+                    scene.removeItem(self._angle_label)
+                except (RuntimeError, AttributeError):
+                    pass
+            self._angle_label = None
+
+    # ------------------------------------------------------------------
+    # 对齐辅助线与吸附
+    # ------------------------------------------------------------------
+
+    def _get_white_frame_world_points_from_local(self, wf_local) -> dict:
+        """根据给定的局部白框坐标，获取世界坐标中的对齐参考点。"""
+        if wf_local is None:
+            return {}
+        left, top, right, bottom = wf_local
+        cx = (left + right) / 2.0
+        cy = (top + bottom) / 2.0
+        return {
+            "center": self.mapToScene(QPointF(cx, cy)),
+            "left": self.mapToScene(QPointF(left, cy)),
+            "right": self.mapToScene(QPointF(right, cy)),
+            "top": self.mapToScene(QPointF(cx, top)),
+            "bottom": self.mapToScene(QPointF(cx, bottom)),
+        }
+
+    def _get_white_frame_world_points(self) -> dict:
+        """获取当前白框在世界坐标中的对齐参考点。"""
+        return self._get_white_frame_world_points_from_local(self.geo.white_frame_local)
+
+    def _get_other_items_snap_targets(self) -> list:
+        """获取场景中其他 RegionTextItem 的对齐参考点。"""
+        targets = []
+        scene = self.scene()
+        if scene is None:
+            return targets
+        for item in scene.items():
+            if isinstance(item, RegionTextItem) and item is not self:
+                pts = item._get_white_frame_world_points()
+                if pts:
+                    targets.append(pts)
+        return targets
+
+    def _calculate_snap_offset(self, my_points: dict, targets: list) -> tuple:
+        """计算当前文本框与场景中其他项的对齐吸附偏移量及辅助线坐标。"""
+        threshold = self._snap_threshold  # 保持 1px 的绝对距离阈值，不随缩放变化
+        best_dx = None
+        best_dy = None
+        best_dx_dist = threshold + 0.001
+        best_dy_dist = threshold + 0.001
+        guide_x_info = None
+        guide_y_info = None
+
+        ref_keys = ["center", "left", "right", "top", "bottom"]
+        for target_pts in targets:
+            for my_key in ref_keys:
+                my_pt = my_points.get(my_key)
+                if my_pt is None:
+                    continue
+                for tgt_key in ref_keys:
+                    tgt_pt = target_pts.get(tgt_key)
+                    if tgt_pt is None:
+                        continue
+                    dx = tgt_pt.x() - my_pt.x()
+                    if abs(dx) < best_dx_dist:
+                        best_dx_dist = abs(dx)
+                        best_dx = dx
+                        guide_x_info = (tgt_pt.x(), my_pt.y(), tgt_pt.y())
+                    dy = tgt_pt.y() - my_pt.y()
+                    if abs(dy) < best_dy_dist:
+                        best_dy_dist = abs(dy)
+                        best_dy = dy
+                        guide_y_info = (tgt_pt.y(), my_pt.x(), tgt_pt.x())
+
+        snap_dx = 0.0
+        snap_dy = 0.0
+        guides = []
+        if best_dx is not None and best_dx_dist <= threshold:
+            snap_dx = best_dx
+            if guide_x_info:
+                x, y1, y2 = guide_x_info
+                guides.append({"kind": "vertical", "x": x})
+        if best_dy is not None and best_dy_dist <= threshold:
+            snap_dy = best_dy
+            if guide_y_info:
+                y, x1, x2 = guide_y_info
+                guides.append({"kind": "horizontal", "y": y})
+        return snap_dx, snap_dy, guides
+
+    def _visible_scene_rect(self, scene: QGraphicsScene) -> QRectF:
+        """返回当前视图联合后的可见场景区域。"""
+        visible_rect = QRectF()
+        has_visible_rect = False
+        for view in scene.views():
+            view_rect = view.mapToScene(view.viewport().rect()).boundingRect()
+            if not has_visible_rect:
+                visible_rect = view_rect
+                has_visible_rect = True
+            else:
+                visible_rect = visible_rect.united(view_rect)
+        if not has_visible_rect or visible_rect.isNull():
+            visible_rect = scene.sceneRect()
+        return visible_rect
+
+    def _build_guide_line(self, scene: QGraphicsScene, visible_rect: QRectF, extent: float, pen: QPen, guide_spec):
+        """根据辅助线描述创建场景线条，兼容显式方向和端点线段两种格式。"""
+        if isinstance(guide_spec, dict):
+            kind = guide_spec.get("kind")
+            if kind == "vertical":
+                x = guide_spec.get("x")
+                if x is None:
+                    return None
+                return scene.addLine(x, visible_rect.top(), x, visible_rect.bottom(), pen)
+            if kind == "horizontal":
+                y = guide_spec.get("y")
+                if y is None:
+                    return None
+                return scene.addLine(visible_rect.left(), y, visible_rect.right(), y, pen)
+            if kind == "segment":
+                start = guide_spec.get("start")
+                end = guide_spec.get("end")
+                if start is None or end is None:
+                    return None
+                x1, y1 = start
+                x2, y2 = end
+            else:
+                return None
+        else:
+            try:
+                (x1, y1), (x2, y2) = guide_spec
+            except (TypeError, ValueError):
+                return None
+
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 0.001:
+            return None
+        if abs(dx) < 0.001:
+            return scene.addLine(x1, visible_rect.top(), x1, visible_rect.bottom(), pen)
+        if abs(dy) < 0.001:
+            return scene.addLine(visible_rect.left(), y1, visible_rect.right(), y1, pen)
+
+        ux, uy = dx / length, dy / length
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        return scene.addLine(
+            cx - extent * ux, cy - extent * uy,
+            cx + extent * ux, cy + extent * uy,
+            pen
+        )
+
+    def _show_guide_lines(self, guide_specs: list, is_rotation: bool = False):
+        """在场景中绘制全屏的对齐/旋转辅助虚线。"""
+        self._clear_guide_lines()
+        scene = self.scene()
+        if scene is None or not guide_specs:
+            return
+
+        visible_rect = self._visible_scene_rect(scene)
+
+        # 根据可视区域对角线计算一个足够长的延伸距离
+        extent = 2.0 * math.hypot(visible_rect.width(), visible_rect.height())
+
+        # 旋转时用橙黄色，平移吸附用青色
+        if is_rotation:
+            pen = QPen(QColor(255, 165, 0, 255), 1.5)
+        else:
+            pen = QPen(QColor(0, 255, 255, 255), 2.0)
+        pen.setCosmetic(True)
+        pen.setStyle(Qt.PenStyle.DashLine)
+
+        for guide_spec in guide_specs:
+            line = self._build_guide_line(scene, visible_rect, extent, pen, guide_spec)
+            if line is None:
+                continue
+            line.setZValue(9999) # 确保层级最高
+            self._guide_lines.append(line)
+
+    def _clear_guide_lines(self):
+        """清除所有辅助线。"""
+        scene = self.scene()
+        for line in self._guide_lines:
+            try:
+                if scene is not None:
+                    scene.removeItem(line)
+            except (RuntimeError, AttributeError):
+                pass
+        self._guide_lines.clear()
+
+    # ------------------------------------------------------------------
+    # 右键自定义角度
+    # ------------------------------------------------------------------
+
+    def _show_angle_input_dialog(self):
+        """弹出对话框让用户输入自定义旋转角度。"""
+        view = self._primary_view()
+        if view is None:
+            return
+        current_angle = self.rotation_angle % 360
+        if current_angle > 180:
+            current_angle -= 360
+        angle, ok = QInputDialog.getDouble(
+            view, "设置旋转角度", "角度 (度)：",
+            current_angle, -360.0, 360.0, 1,
+        )
+        if ok:
+            self._apply_custom_rotation(angle)
+
+    def _apply_custom_rotation(self, target_angle: float):
+        """应用用户输入的自定义角度。"""
+        pivot_local = self._rotation_pivot_local()
+        pivot_scene = self.mapToScene(pivot_local)
+
+        self.setRotation(target_angle)
+        self.rotation_angle = float(target_angle)
+
+        theta = np.radians(target_angle)
+        cos_t, sin_t = np.cos(theta), np.sin(theta)
+        px, py = pivot_local.x(), pivot_local.y()
+        self.setPos(QPointF(
+            pivot_scene.x() - (px * cos_t - py * sin_t),
+            pivot_scene.y() - (px * sin_t + py * cos_t),
+        ))
+        self.visual_center = QPointF(self.pos())
+
+        old_center = self.geo.center
+        if not (isinstance(old_center, (list, tuple)) and len(old_center) >= 2):
+            old_center = [self.visual_center.x(), self.visual_center.y()]
+        delta_x = float(self.pos().x()) - float(old_center[0])
+        delta_y = float(self.pos().y()) - float(old_center[1])
+
+        new_lines = []
+        for poly in self.region_data.get("lines", []):
+            new_poly = []
+            for p in poly:
+                if isinstance(p, (list, tuple)) and len(p) >= 2:
+                    new_poly.append([float(p[0]) + delta_x, float(p[1]) + delta_y])
+            if new_poly:
+                new_lines.append(new_poly)
+
+        new_cx, new_cy = float(self.pos().x()), float(self.pos().y())
+        self.visual_center = QPointF(new_cx, new_cy)
+        self.geo.center = [new_cx, new_cy]
+        self.geo.angle = float(target_angle)
+        if new_lines:
+            self.geo.lines = new_lines
+        self.geo._rebuild_polygons_local()
+        if not self.geo.has_custom_white_frame:
+            self.geo._auto_update_white_frame()
+
+        new_data = build_rotate_region_data(
+            self.region_data, target_angle,
+            new_center=[new_cx, new_cy],
+            new_lines=new_lines or None,
+        )
+        self._commit_region_data(new_data)
+        self._in_callback = True
+        try:
+            self.geometry_callback(self.region_index, new_data)
+        finally:
+            self._in_callback = False
 
     # ------------------------------------------------------------------
     # 手柄命中检测
@@ -638,11 +963,13 @@ class RegionTextItem(QGraphicsItemGroup):
                 return
             elif event.button() == Qt.MouseButton.RightButton:
                 if self.isSelected():
-                    event.accept()
-                    return
-                else:
-                    super().mousePressEvent(event)
-                    return
+                    handle, _ = self._get_handle_at(local_pos)
+                    if handle == "rotate":
+                        self._show_angle_input_dialog()
+                        event.accept()
+                        return
+                super().mousePressEvent(event)
+                return
             else:
                 super().mousePressEvent(event)
         except Exception as e:
@@ -723,11 +1050,41 @@ class RegionTextItem(QGraphicsItemGroup):
     # ------------------------------------------------------------------
 
     def _handle_rotate_drag(self, event):
+        """执行旋转拖拽逻辑，包含角度实时显示与吸附计算。"""
         center_scene = self._drag_start_pivot_scene
         vec = event.scenePos() - center_scene
         new_angle_rad = np.arctan2(vec.y(), vec.x())
-        delta_deg = np.degrees(new_angle_rad - self._drag_start_angle_rad)
+        delta_rad = np.arctan2(
+            np.sin(new_angle_rad - self._drag_start_angle_rad),
+            np.cos(new_angle_rad - self._drag_start_angle_rad)
+        )
+        delta_deg = np.degrees(delta_rad)
         new_rot = self._drag_start_rotation + delta_deg
+
+        # --- 角度吸附逻辑 ---
+        snap_targets = [0.0, 90.0, 180.0, 270.0, 360.0, -90.0, -180.0, -270.0, -360.0]
+        # 获取其他文本框的角度
+        scene = self.scene()
+        if scene is not None:
+            for item in scene.items():
+                if isinstance(item, RegionTextItem) and item is not self:
+                    snap_targets.append(item.rotation() % 360)
+                    snap_targets.append((item.rotation() % 360) - 360)
+
+        best_diff = 3.0 # 角度吸附阈值 3 度
+        snapped_rot = new_rot
+        normalized_rot = new_rot % 360
+        for target in snap_targets:
+            normalized_target = target % 360
+            diff = min(abs(normalized_rot - normalized_target), 360 - abs(normalized_rot - normalized_target))
+            if diff <= best_diff:
+                best_diff = diff
+                # 需要算出一个实际的旋转度数
+                # 尽量保持接近 new_rot 的那个圈数
+                rounds = round((new_rot - target) / 360.0)
+                snapped_rot = target + rounds * 360.0
+
+        new_rot = snapped_rot
         self.setRotation(new_rot)
 
         # 保持白框中心（局部点）在场景中不动
@@ -739,6 +1096,28 @@ class RegionTextItem(QGraphicsItemGroup):
             center_scene.y() - (px * sin_t + py * cos_t),
         ))
         self.visual_center = QPointF(self.pos())
+
+        # 显示旋转角度
+        rot_handle_scene = self.mapToScene(self._rotate_handle_info()["rot_pos"])
+        self._show_angle_label(new_rot, rot_handle_scene)
+
+        # ====== 旋转时的整框延长线（辅助对齐背景斜线） ======
+        wf = self.geo.white_frame_local
+        if wf is not None:
+            left, top, right, bottom = wf
+            pts = [
+                self.mapToScene(QPointF(left, top)),
+                self.mapToScene(QPointF(right, top)),
+                self.mapToScene(QPointF(right, bottom)),
+                self.mapToScene(QPointF(left, bottom)),
+            ]
+            rot_guides = [
+                ((pts[0].x(), pts[0].y()), (pts[1].x(), pts[1].y())),
+                ((pts[1].x(), pts[1].y()), (pts[2].x(), pts[2].y())),
+                ((pts[2].x(), pts[2].y()), (pts[3].x(), pts[3].y())),
+                ((pts[3].x(), pts[3].y()), (pts[0].x(), pts[0].y())),
+            ]
+            self._show_guide_lines(rot_guides, is_rotation=True)
 
     def _commit_rotation(self, event):
         new_angle = self.rotation()
@@ -787,11 +1166,11 @@ class RegionTextItem(QGraphicsItemGroup):
             if self._drag_handle_indices is None or self._drag_start_white_frame_local is None:
                 return
 
-            l0, t0, r0, b0 = self._drag_start_white_frame_local
+            left0, top0, right0, bottom0 = self._drag_start_white_frame_local
             cx, cy = self.geo.center
             start_verts = [
-                [l0 + cx, t0 + cy], [r0 + cx, t0 + cy],
-                [r0 + cx, b0 + cy], [l0 + cx, b0 + cy],
+                [left0 + cx, top0 + cy], [right0 + cx, top0 + cy],
+                [right0 + cx, bottom0 + cy], [left0 + cx, bottom0 + cy],
             ]
 
             delta = event.scenePos() - self._drag_start_scene_pos
@@ -842,6 +1221,7 @@ class RegionTextItem(QGraphicsItemGroup):
             logger.error(f"[RegionTextItem] _handle_white_frame_edit: {e}\n{traceback.format_exc()}")
 
     def _handle_white_frame_move(self, event: QGraphicsSceneMouseEvent):
+        """执行白框平移逻辑，包含位置对齐吸附与辅助线显示。"""
         try:
             if self._drag_start_white_frame_local is None:
                 return
@@ -855,8 +1235,30 @@ class RegionTextItem(QGraphicsItemGroup):
             dx = scene_delta.x() * cos_a + scene_delta.y() * sin_a
             dy = -scene_delta.x() * sin_a + scene_delta.y() * cos_a
 
-            l, t, r, b = self._drag_start_white_frame_local
-            moved = [l + dx, t + dy, r + dx, b + dy]
+            left, top, right, bottom = self._drag_start_white_frame_local
+            moved = [left + dx, top + dy, right + dx, bottom + dy]
+
+            # --- 吸附逻辑 ---
+            my_points = self._get_white_frame_world_points_from_local(moved)
+            targets = self._get_other_items_snap_targets()
+            if my_points and targets:
+                snap_dx_scene, snap_dy_scene, guide_specs = self._calculate_snap_offset(
+                    my_points, targets
+                )
+                if snap_dx_scene != 0.0 or snap_dy_scene != 0.0:
+                    snap_local_dx = snap_dx_scene * cos_a + snap_dy_scene * sin_a
+                    snap_local_dy = -snap_dx_scene * sin_a + snap_dy_scene * cos_a
+                    moved = [
+                        moved[0] + snap_local_dx, moved[1] + snap_local_dy,
+                        moved[2] + snap_local_dx, moved[3] + snap_local_dy,
+                    ]
+                    dx += snap_local_dx
+                    dy += snap_local_dy
+                    logger.debug(f"[RegionTextItem] snap: dx={snap_dx_scene:.1f} dy={snap_dy_scene:.1f}")
+                self._show_guide_lines(guide_specs)
+            else:
+                self._clear_guide_lines()
+            # --- 吸附逻辑结束 ---
 
             self.prepareGeometryChange()
             self._shape_path = None
@@ -887,20 +1289,20 @@ class RegionTextItem(QGraphicsItemGroup):
     def _white_handle_world_at_start(self):
         if self._drag_start_white_frame_local is None:
             return None
-        l, t, r, b = self._drag_start_white_frame_local
+        left, top, right, bottom = self._drag_start_white_frame_local
         cx, cy = self.geo.center
         angle = self.rotation_angle
 
         if self._interaction_mode == "white_corner":
             idx = self._drag_handle_indices
-            corners = [(l + cx, t + cy), (r + cx, t + cy), (r + cx, b + cy), (l + cx, b + cy)]
+            corners = [(left + cx, top + cy), (right + cx, top + cy), (right + cx, bottom + cy), (left + cx, bottom + cy)]
             if not (0 <= idx < 4):
                 return None
             return self._rotated_world_point(corners[idx], cx, cy, angle)
 
         if self._interaction_mode == "white_edge":
             idx = self._drag_handle_indices
-            edge_points = self._white_edge_world_points(l, t, r, b, cx, cy)
+            edge_points = self._white_edge_world_points(left, top, right, bottom, cx, cy)
             if not (0 <= idx < 4):
                 return None
             return self._rotated_world_point(edge_points[idx], cx, cy, angle)
